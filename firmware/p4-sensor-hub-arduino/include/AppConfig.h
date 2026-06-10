@@ -9,7 +9,7 @@ constexpr uint8_t kI2cScl = 8;
 constexpr uint8_t kSpiSck = 28;
 constexpr uint8_t kSpiMosi = 29;
 constexpr uint8_t kSpiMiso = 30;
-constexpr uint8_t kThermocoupleCs[] = {21, 20, 36, 35, 34, 31};
+constexpr uint8_t kChipSelects[] = {21, 20, 36, 35, 34, 31};
 
 constexpr uint8_t kD6fAnalog = 23;  // A3
 
@@ -26,6 +26,14 @@ constexpr uint8_t kFlow1Rx = 5;
 constexpr uint8_t kFlow2Tx = 37;  // D1
 constexpr uint8_t kFlow2Rx = 38;  // D0
 }  // namespace Pins
+
+namespace Addresses {
+constexpr uint8_t kBme688 = 0x77;
+constexpr uint8_t kMcp23017 = 0x20;
+
+//Not used; library defaults to this and doesn't support changing it. Here for ground truth/reference.
+constexpr uint8_t kSht45 = 0x44;    
+}  // namespace Addresses
 
 namespace Config {
 constexpr uint32_t kUsbBaud = 115200;

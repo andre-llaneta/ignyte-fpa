@@ -23,7 +23,7 @@ There are two firmware skeletons in the repo:
 - `firmware/p4-sensor-hub`: ESP-IDF skeleton
 - `firmware/p4-sensor-hub-arduino`: PlatformIO/Arduino skeleton
 
-The current active bring-up path is PlatformIO/Arduino because it is quicker to iterate and matches the developer's current comfort level. The code is intentionally organized into small wrappers so a later ESP-IDF port is easier:
+The current active bring-up path is PlatformIO/Arduino because it is quicker to iterate. The code is intentionally organized into small wrappers so a later ESP-IDF port is easier:
 
 - app logic is in `main.cpp`
 - central hardware constants are in `AppConfig.h`
@@ -81,28 +81,29 @@ The board may later support more I2C devices, including via an I/O expander boar
 | MOSI | 29 |
 | MISO | 30 |
 
-Thermocouple chip-select pins:
+SPI chip-select pins:
 
 | Channel | GPIO |
 | --- | ---: |
-| TC1 CS | 21 |
-| TC2 CS | 20 |
-| TC3 CS | 36 |
-| TC4 CS | 35 |
-| TC5 CS | 34 |
-| TC6 CS | 31 |
+| CS | 21 |
+| CS | 20 |
+| CS | 36 |
+| CS | 35 |
+| CS | 34 |
+| CS | 31 |
 
-First bring-up uses 4 MAX31856 thermocouple boards. The board has capacity for 6 SPI chip-selects.
+First bring-up uses 4 MAX31856 thermocouple boards. The board has capacity for 2 offboard SPI sensors.
 
 ### Analog
 
 | Signal | GPIO |
 | --- | ---: |
-| D6F analog output | 23 / A3 |
+| Analog 1 | 23 / A3 |
+| Analog 2 | 22 / A2 |
 
 The first analog sensor is an Omron D6F-V03A1 flow velocity sensor.
 
-### TMC2209 / Vertical Stage
+### TMC2209 / Vertical Camera Stage
 
 | Signal | GPIO |
 | --- | ---: |
@@ -114,7 +115,7 @@ The first analog sensor is an Omron D6F-V03A1 flow velocity sensor.
 | TMC2209 UART | 32 |
 | Driver enable | 33 |
 
-`GPIO32` is assumed to be the TMC2209 single-wire UART pin. `GPIO33` is the motor driver enable pin.
+`GPIO32` is the TMC2209 single-wire UART pin. `GPIO33` is the motor driver enable pin.
 
 ### Bronkhorst RS232
 
@@ -127,7 +128,7 @@ The two Bronkhorst controllers are point-to-point, one controller per RS232 chan
 
 ## Dependencies
 
-The current PlatformIO project uses real libraries:
+The current PlatformIO project uses libraries:
 
 - `ArduinoJson`: JSON command parsing and telemetry output
 - `TMCStepper`: TMC2209 UART configuration/status
@@ -212,7 +213,7 @@ The SHT45 wrapper reads:
 - temperature in Celsius
 - relative humidity in percent
 
-It currently uses high precision and no heater.
+It currently uses high precision and no heater. The I2C address is 0x44 and cannot be changed (a manufacturer limitation).
 
 ### BME688
 

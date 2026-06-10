@@ -15,6 +15,7 @@
 
 HardwareSerial TmcSerial(1);
 HardwareSerial Flow1Serial(2);
+// TODO: UART0 is often used for download/logging; switch Flow2 to UART3 if the P4 Arduino core supports it.
 HardwareSerial Flow2Serial(0);
 
 Telemetry telemetry;
@@ -22,12 +23,12 @@ MotorController motor(TmcSerial);
 ProparAsciiClient flow1(Flow1Serial, "flow1");
 ProparAsciiClient flow2(Flow2Serial, "flow2");
 
-Max31856Sensor tc1("tc1", Pins::kThermocoupleCs[0], 10);
-Max31856Sensor tc2("tc2", Pins::kThermocoupleCs[1], 10);
-Max31856Sensor tc3("tc3", Pins::kThermocoupleCs[2], 10);
-Max31856Sensor tc4("tc4", Pins::kThermocoupleCs[3], 10);
+Max31856Sensor tc1("tc1", Pins::kChipSelects[0], 10);
+Max31856Sensor tc2("tc2", Pins::kChipSelects[1], 10);
+Max31856Sensor tc3("tc3", Pins::kChipSelects[2], 10);
+Max31856Sensor tc4("tc4", Pins::kChipSelects[3], 10);
 Sht45Sensor sht45("sht45", Wire, 2);
-Bme688Sensor bme688("bme688", Wire, 2);
+Bme688Sensor bme688("bme688", Wire, 2, Addresses::kBme688);
 AnalogD6FSensor d6f("d6f_v03a1", Pins::kD6fAnalog, 50);
 
 SensorBase* sensors[] = {

@@ -33,28 +33,39 @@ Review in this order:
 
 ## How To Ask The Agent
 
+```text
 Good prompts:
-
+```
+```text
 Explain this subsystem in plain language before editing it.
-
+```
+```text
 List the assumptions and safety risks in this file.
-
+```
+```text
 Make the smallest change needed and then run the build.
-
+```
+```text
 Create a no-motion test for the TMC2209 UART only.
-
+```
+```text
 Walk me through this file line by line, but focus on what affects hardware.
-
+```
+```text
 Before editing, tell me which files you plan to change and why.
-
+```
+```text
 Avoid broad prompts like:
-
+```
+```text
 Finish all the firmware.
-
+```
+```text
 Make it production ready.
-
+```
+```text
 Refactor everything.
-
+```
 ## Build Rule
 
 Run a build after every meaningful code change:
@@ -153,6 +164,15 @@ Ask for line-by-line explanation when a file:
 
 For simple sensor wrappers, a high-level explanation is usually enough unless something fails.
 
+## For each subsystem ask:
+
+What hardware can this touch?
+What assumptions does it make?
+What happens if the hardware is missing, wired wrong, or returns bad data?
+Can this block something important?
+What data does it emit?
+What would make this unsafe?
+
 ## Documentation Rule
 
 When a design decision changes, update:
@@ -163,3 +183,22 @@ When a design decision changes, update:
 
 Future agents should read `docs/project-context.md` and `docs/workflow.md` before making firmware changes.
 
+What To Look For By Subsystem
+
+## AppConfig.h
+Look for wrong pins, wrong polarity, wrong baud rates, wrong motor constants, wrong sensor addresses. This file should be boring and obvious. If a number here is wrong, the code can behave correctly but control the wrong pin.
+
+## main.cpp
+Look for task priorities, blocking calls, shared objects, command names, and startup order. Ask: does any slow thing block motor control? Does command parsing touch hardware directly? Are boot failures reported clearly?
+
+## MotorController
+This is the highest-risk subsystem. Look for anything that can enable the driver or move the motor. Check current limit, microsteps, direction convention, endstop behavior, homing, soft limits, stop behavior, and whether movement is allowed before homing.
+
+## ProparAsciiClient
+Look for baud rate, node address, timeout behavior, parsing correctness, and what happens if the controller does not respond. Flow setpoint writes should be conservative and should report failure clearly.
+
+## Sensor wrappers
+Look for bus address, sampling rate, units, calibration, fault handling, and whether bad reads are logged as bad rather than silently treated as real data.
+
+## Telemetry
+Look for stable JSON fields, timestamps, line-per-message behavior, and whether multiple tasks can corrupt output. It should be easy for the laptop logger to parse.
