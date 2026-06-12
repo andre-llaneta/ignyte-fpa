@@ -12,6 +12,7 @@ AnalogD6FSensor::AnalogD6FSensor(const char* name, uint8_t pin, uint16_t rateHz)
 bool AnalogD6FSensor::begin() {
   pinMode(pin_, INPUT);
 #if defined(ARDUINO_ARCH_ESP32)
+  analogRead(pin_);
   analogSetPinAttenuation(pin_, ADC_11db);
 #endif
   return true;

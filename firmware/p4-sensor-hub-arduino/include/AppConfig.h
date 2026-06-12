@@ -43,7 +43,7 @@ constexpr uint8_t kSht45 = 0x44;
 namespace SensorRates {
 constexpr uint16_t kTc = 10;      // 10 Hz
 constexpr uint16_t kSht45 = 2;   // 2 Hz
-constexpr uint16_t kBme688 = 1; // 1 Hz
+constexpr uint16_t kBme688 = 2; // 2 Hz
 constexpr uint16_t kD6f = 50;      // 50 Hz
 }  // namespace SensorRates
 

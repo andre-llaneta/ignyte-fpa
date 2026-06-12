@@ -126,15 +126,25 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 **Later:** add `id` in commands and matching `ack` responses.
 
+### Boot Warning Classification
+
+**Current:** setup failures are warning-only and final boot status becomes `ready_with_warnings`.
+
+**Risk:** firmware may continue running even if a device needed for a specific test failed to initialize.
+
+**Later:** classify required devices as critical once bring-up requirements are fixed.
+
 ### Blocking Calls / Motion Smoothness
 
 **Risk:** sensor/flow libraries may block; `AccelStepper` needs frequent service calls.
 
 **Watch for:** motor stutter, command lag, telemetry pauses.
 
+**Current behavior:** one slow sensor read can delay other sensors in `sensorTask`; a Flow 1 timeout can delay Flow 2 in `flowTask`.
+
 **Current note:** `motorTask` uses `delayMicroseconds(200)` instead of `vTaskDelay()` so `AccelStepper` is serviced more often than the FreeRTOS tick. This improves step timing but can burn CPU.
 
-**Later:** use motor queue and consider hardware timer/RMT step generation.
+**Later:** split slow devices into separate tasks, shorten timeouts, use non-blocking drivers, and consider hardware timer/RMT step generation.
 
 ### JSON / Heap Use
 

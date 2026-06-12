@@ -389,6 +389,12 @@ Current command responses are status messages, also JSONL:
 {"type":"status","t_us":123456789,"component":"flow1","status":"setpoint_ok"}
 ```
 
+Startup failures are warning-only for now. Failed sensor/expander/queue setup adds `"severity":"warning"` and the final boot message becomes:
+
+```json
+{"type":"status","component":"boot","status":"ready_with_warnings"}
+```
+
 Future command protocol improvements:
 
 - add command IDs so the laptop can match responses to requests

@@ -62,7 +62,11 @@ struct MotorCommand {
 QueueHandle_t motorCommandQueue = nullptr;
 
 // function for publishing status messages to telemetry with a consistent format
-void publishStatus(const char* component, const char* status, const char* detail = nullptr) {
+void publishStatus(
+    const char* component,
+    const char* status,
+    const char* detail = nullptr,
+    const char* severity = nullptr) {
   JsonDocument doc;
   doc["type"] = "status";
   doc["t_us"] = nowUs();
@@ -70,6 +74,9 @@ void publishStatus(const char* component, const char* status, const char* detail
   doc["status"] = status;
   if (detail != nullptr) {
     doc["detail"] = detail;
+  }
+  if (severity != nullptr) {
+    doc["severity"] = severity;
   }
   telemetry.write(doc);
 }
@@ -262,20 +269,33 @@ void setup() {
 
   telemetry.begin();
   publishStatus("boot", "starting");
+  bool bootWarnings = false;
 
   motorCommandQueue = xQueueCreate(8, sizeof(MotorCommand));
-  publishStatus("motor", motorCommandQueue != nullptr ? "queue_ok" : "queue_failed");
+  const bool motorQueueOk = motorCommandQueue != nullptr;
+  publishStatus("motor", motorQueueOk ? "queue_ok" : "queue_failed", nullptr, motorQueueOk ? nullptr : "warning");
+  bootWarnings = bootWarnings || !motorQueueOk;
 
   Wire.begin(Pins::kI2cSda, Pins::kI2cScl);
   SPI.begin(Pins::kSpiSck, Pins::kSpiMiso, Pins::kSpiMosi);
 
   const bool ioExpanderOk = ioExpander.begin(Wire);
-  publishStatus("io_expander", ioExpanderOk ? "begin_ok" : "begin_failed");
+  publishStatus(
+      "io_expander",
+      ioExpanderOk ? "begin_ok" : "begin_failed",
+      nullptr,
+      ioExpanderOk ? nullptr : "warning");
+  bootWarnings = bootWarnings || !ioExpanderOk;
   if (ioExpanderOk) {
     const bool microstepsOk = ioExpander.setMotorMicrosteps(Config::kMicrosteps);
-    publishStatus("io_expander", microstepsOk ? "motor_microsteps_ok" : "motor_microsteps_invalid");
+    publishStatus(
+        "io_expander",
+        microstepsOk ? "motor_microsteps_ok" : "motor_microsteps_invalid",
+        nullptr,
+        microstepsOk ? nullptr : "warning");
+    bootWarnings = bootWarnings || !microstepsOk;
   } else {
-    publishStatus("motor", "microstep_pins_unverified", "mcp23017_missing");
+    publishStatus("motor", "microstep_pins_unverified", "mcp23017_missing", "warning");
   }
 
   motor.begin();
@@ -284,7 +304,8 @@ void setup() {
 
   for (SensorBase* sensor : sensors) {
     const bool ok = sensor->begin();
-    publishStatus(sensor->name(), ok ? "begin_ok" : "begin_failed");
+    publishStatus(sensor->name(), ok ? "begin_ok" : "begin_failed", nullptr, ok ? nullptr : "warning");
+    bootWarnings = bootWarnings || !ok;
     sensor->markRead(nowUs());
   }
 
@@ -293,7 +314,7 @@ void setup() {
   xTaskCreate(sensorTask, "sensors", 8192, nullptr, 2, nullptr);
   xTaskCreate(flowTask, "flow", 6144, nullptr, 2, nullptr);
 
-  publishStatus("boot", "ready");
+  publishStatus("boot", bootWarnings ? "ready_with_warnings" : "ready");
 }
 
 void loop() {
