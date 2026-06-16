@@ -44,6 +44,7 @@ SensorBase* sensors[] = {
 };
 
 constexpr size_t kSensorCount = sizeof(sensors) / sizeof(sensors[0]);
+bool sensorOnline[kSensorCount] = {};
 
 enum class MotorCommandType {
   MoveSteps,
@@ -51,6 +52,9 @@ enum class MotorCommandType {
   VelocityMmS,
   Stop,
   HomeHere,
+  Enable,
+  Disable,
+  ReportStatus,
 };
 
 struct MotorCommand {
@@ -107,6 +111,20 @@ bool queueMotorCommand(const MotorCommand& command) {
   return true;
 }
 
+void publishMotorState(const char* status) {
+  JsonDocument doc;
+  doc["type"] = "status";
+  doc["t_us"] = nowUs();
+  doc["component"] = "motor";
+  doc["status"] = status;
+  doc["enabled"] = motor.enabled();
+  doc["endstop_active"] = motor.endstopActive();
+  doc["velocity_mode"] = motor.velocityMode();
+  doc["position_steps"] = motor.positionSteps();
+  doc["position_mm"] = motor.positionMm();
+  telemetry.write(doc);
+}
+
 // helper function to apply a motor command immediately; used by the motor task
 void applyMotorCommand(const MotorCommand& command) {
   switch (command.type) {
@@ -124,6 +142,17 @@ void applyMotorCommand(const MotorCommand& command) {
       break;
     case MotorCommandType::HomeHere:
       motor.homeHere();
+      break;
+    case MotorCommandType::Enable:
+      motor.setEnabled(true);
+      publishMotorState("enabled");
+      break;
+    case MotorCommandType::Disable:
+      motor.setEnabled(false);
+      publishMotorState("disabled");
+      break;
+    case MotorCommandType::ReportStatus:
+      publishMotorState("state");
       break;
   }
 }
@@ -154,6 +183,12 @@ void handleCommand(JsonDocument& doc) {
     queueMotorCommand({MotorCommandType::Stop, 0, 0.0f});
   } else if (strcmp(cmd, "motor.home_here") == 0) {
     queueMotorCommand({MotorCommandType::HomeHere, 0, 0.0f});
+  } else if (strcmp(cmd, "motor.enable") == 0) {
+    queueMotorCommand({MotorCommandType::Enable, 0, 0.0f});
+  } else if (strcmp(cmd, "motor.disable") == 0) {
+    queueMotorCommand({MotorCommandType::Disable, 0, 0.0f});
+  } else if (strcmp(cmd, "motor.status") == 0) {
+    queueMotorCommand({MotorCommandType::ReportStatus, 0, 0.0f});
   } else if (strcmp(cmd, "flow.set") == 0) {
     const uint8_t channel = doc["channel"] | 1;
     const float pct = constrain(doc["pct"] | 0.0f, 0.0f, 100.0f);
@@ -201,7 +236,12 @@ void commandTask(void*) {
 void sensorTask(void*) {
   for (;;) {
     const uint64_t timestampUs = nowUs();
-    for (SensorBase* sensor : sensors) {
+    for (size_t i = 0; i < kSensorCount; ++i) {
+      if (!sensorOnline[i]) {
+        continue;
+      }
+
+      SensorBase* sensor = sensors[i];
       if (!sensor->due(timestampUs)) {
         continue;
       }
@@ -250,6 +290,7 @@ void flowTask(void*) {
 
 void motorTask(void*) {
   MotorCommand command;
+  uint8_t yieldCounter = 0;
 
   for (;;) {
     if (motorCommandQueue != nullptr) {
@@ -260,6 +301,10 @@ void motorTask(void*) {
 
     motor.service();
     delayMicroseconds(200);
+    if (++yieldCounter >= 10) {
+      yieldCounter = 0;
+      vTaskDelay(pdMS_TO_TICKS(1));
+    }
   }
 }
 
@@ -277,7 +322,7 @@ void setup() {
   bootWarnings = bootWarnings || !motorQueueOk;
 
   Wire.begin(Pins::kI2cSda, Pins::kI2cScl);
-  SPI.begin(Pins::kSpiSck, Pins::kSpiMiso, Pins::kSpiMosi);
+  // SPI.begin(Pins::kSpiSck, Pins::kSpiMiso, Pins::kSpiMosi);
 
   const bool ioExpanderOk = ioExpander.begin(Wire);
   publishStatus(
@@ -302,8 +347,10 @@ void setup() {
   flow1.begin(Config::kFlowBaud, Pins::kFlow1Rx, Pins::kFlow1Tx);
   flow2.begin(Config::kFlowBaud, Pins::kFlow2Rx, Pins::kFlow2Tx);
 
-  for (SensorBase* sensor : sensors) {
+  for (size_t i = 0; i < kSensorCount; ++i) {
+    SensorBase* sensor = sensors[i];
     const bool ok = sensor->begin();
+    sensorOnline[i] = ok;
     publishStatus(sensor->name(), ok ? "begin_ok" : "begin_failed", nullptr, ok ? nullptr : "warning");
     bootWarnings = bootWarnings || !ok;
     sensor->markRead(nowUs());
@@ -311,7 +358,7 @@ void setup() {
 
   xTaskCreate(motorTask, "motor", 4096, nullptr, 5, nullptr);
   xTaskCreate(commandTask, "commands", 6144, nullptr, 3, nullptr);
-  xTaskCreate(sensorTask, "sensors", 8192, nullptr, 2, nullptr);
+  // xTaskCreate(sensorTask, "sensors", 8192, nullptr, 2, nullptr); # for motor bring up
   xTaskCreate(flowTask, "flow", 6144, nullptr, 2, nullptr);
 
   publishStatus("boot", bootWarnings ? "ready_with_warnings" : "ready");

@@ -2,7 +2,7 @@
 #include "AppConfig.h"
 
 namespace {
-constexpr float kRsenseOhms = 0.05f; // from Adafruit schematic for TMC2209
+constexpr float kRsenseOhms = 0.05f;  // from Adafruit schematic for TMC2209
 constexpr uint8_t kDriverAddress = 0b00;
 }  // namespace
 
@@ -17,13 +17,13 @@ void MotorController::begin() {
   pinMode(Pins::kMotorIndex, INPUT);
   pinMode(Pins::kMotorEndstop, Config::kEndstopActiveLow ? INPUT_PULLUP : INPUT_PULLDOWN);
 
-  setEnable(false);
+  setEnabled(false);
   serial_.begin(Config::kTmcBaud, SERIAL_8N1, Pins::kTmcUart, Pins::kTmcUart);
 
   driver_.begin();
   driver_.pdn_disable(true);
   driver_.I_scale_analog(false);
-  driver_.rms_current(600);
+  driver_.rms_current(300);
   driver_.microsteps(Config::kMicrosteps);
   driver_.toff(5);
   driver_.en_spreadCycle(false);
@@ -31,10 +31,14 @@ void MotorController::begin() {
 
   stepper_.setMaxSpeed(Config::kMaxStageSpeedMmS * Config::kStepsPerMm);
   stepper_.setAcceleration(Config::kMaxStageAccelMmS2 * Config::kStepsPerMm);
-  setEnable(true);
+  setEnabled(false);
 }
 
 void MotorController::service() {
+  if (!enabled_) {
+    return;
+  }
+
   if (endstopActive() && stepper_.speed() < 0.0f) {
     stepper_.setCurrentPosition(0);
     stepper_.stop();
@@ -83,12 +87,25 @@ float MotorController::positionMm() {
   return static_cast<float>(positionSteps()) / Config::kStepsPerMm;
 }
 
+bool MotorController::enabled() const {
+  return enabled_;
+}
+
+bool MotorController::velocityMode() const {
+  return velocityMode_;
+}
+
 bool MotorController::endstopActive() const {
   const int value = digitalRead(Pins::kMotorEndstop);
   return Config::kEndstopActiveLow ? value == LOW : value == HIGH;
 }
 
-void MotorController::setEnable(bool enabled) {
+void MotorController::setEnabled(bool enabled) {
+  if (!enabled) {
+    stop();
+  }
+
+  enabled_ = enabled;
   const bool pinLevel = Config::kMotorEnableActiveLow ? !enabled : enabled;
   digitalWrite(Pins::kMotorEnable, pinLevel ? HIGH : LOW);
 }

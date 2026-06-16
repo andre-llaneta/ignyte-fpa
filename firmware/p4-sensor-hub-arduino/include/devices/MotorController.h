@@ -17,13 +17,15 @@ class MotorController {
   void homeHere();
   long positionSteps();
   float positionMm();
+  bool endstopActive() const;
+  bool enabled() const;
+  bool velocityMode() const;
+  void setEnabled(bool enabled);
 
  private:
-  bool endstopActive() const;
-  void setEnable(bool enabled);
-
   HardwareSerial& serial_;
   TMC2209Stepper driver_;
   AccelStepper stepper_;
   bool velocityMode_ = false;
+  bool enabled_ = false;
 };

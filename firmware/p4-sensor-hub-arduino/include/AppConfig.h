@@ -54,7 +54,7 @@ constexpr uint32_t kTmcBaud = 115200;
 
 constexpr uint8_t kBronkhorstNodePointToPoint = 0x80;
 
-constexpr float kStepperFullStepsPerRev = 200.0f;
+constexpr float kStepperFullStepsPerRev = 400.0f;
 constexpr float kLeadScrewMmPerRev = 2.0f;
 constexpr uint16_t kMicrosteps = 16;
 constexpr float kStepsPerMm =
