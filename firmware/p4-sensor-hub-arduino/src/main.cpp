@@ -40,7 +40,8 @@ SensorBase* sensors[] = {
     &tc4,
     &sht45,
     &bme688,
-    &d6f,
+    // D6F is disabled during bidirectional TMC2209 UART bring-up because GPIO23 is TMC TX.
+    // &d6f,
 };
 
 constexpr size_t kSensorCount = sizeof(sensors) / sizeof(sensors[0]);
@@ -55,6 +56,9 @@ enum class MotorCommandType {
   Enable,
   Disable,
   ReportStatus,
+  DriverStatus,
+  DriverConfigure,
+  StallStatus,
 };
 
 struct MotorCommand {
@@ -125,6 +129,40 @@ void publishMotorState(const char* status) {
   telemetry.write(doc);
 }
 
+void publishDriverStatus() {
+  const TmcDriverDiagnostics diagnostics = motor.readDriverDiagnostics();
+  JsonDocument doc;
+  doc["type"] = "status";
+  doc["t_us"] = nowUs();
+  doc["component"] = "motor";
+  doc["status"] = "driver_status";
+  doc["connection_result"] = diagnostics.connection_result;
+  doc["connection_ok"] = diagnostics.connection_result == 0;
+  doc["ifcnt"] = diagnostics.ifcnt;
+  doc["ioin"] = diagnostics.ioin;
+  doc["version"] = diagnostics.version;
+  doc["drv_status"] = diagnostics.drv_status;
+  doc["rms_current_ma"] = diagnostics.rms_current_ma;
+  doc["microsteps"] = diagnostics.microsteps;
+  telemetry.write(doc);
+}
+
+void publishStallStatus() {
+  const TmcStallDiagnostics diagnostics = motor.readStallDiagnostics();
+  JsonDocument doc;
+  doc["type"] = "status";
+  doc["t_us"] = nowUs();
+  doc["component"] = "motor";
+  doc["status"] = "stall_status";
+  doc["sg_result"] = diagnostics.sg_result;
+  doc["sg_threshold"] = diagnostics.sg_threshold;
+  doc["drv_status"] = diagnostics.drv_status;
+  doc["diag_pin"] = diagnostics.diag_pin;
+  doc["enabled"] = diagnostics.enabled;
+  doc["velocity_mode"] = diagnostics.velocity_mode;
+  telemetry.write(doc);
+}
+
 // helper function to apply a motor command immediately; used by the motor task
 void applyMotorCommand(const MotorCommand& command) {
   switch (command.type) {
@@ -153,6 +191,16 @@ void applyMotorCommand(const MotorCommand& command) {
       break;
     case MotorCommandType::ReportStatus:
       publishMotorState("state");
+      break;
+    case MotorCommandType::DriverStatus:
+      publishDriverStatus();
+      break;
+    case MotorCommandType::DriverConfigure:
+      motor.configureDriver();
+      publishDriverStatus();
+      break;
+    case MotorCommandType::StallStatus:
+      publishStallStatus();
       break;
   }
 }
@@ -189,6 +237,12 @@ void handleCommand(JsonDocument& doc) {
     queueMotorCommand({MotorCommandType::Disable, 0, 0.0f});
   } else if (strcmp(cmd, "motor.status") == 0) {
     queueMotorCommand({MotorCommandType::ReportStatus, 0, 0.0f});
+  } else if (strcmp(cmd, "motor.driver_status") == 0) {
+    queueMotorCommand({MotorCommandType::DriverStatus, 0, 0.0f});
+  } else if (strcmp(cmd, "motor.driver_configure") == 0) {
+    queueMotorCommand({MotorCommandType::DriverConfigure, 0, 0.0f});
+  } else if (strcmp(cmd, "motor.stall_status") == 0) {
+    queueMotorCommand({MotorCommandType::StallStatus, 0, 0.0f});
   } else if (strcmp(cmd, "flow.set") == 0) {
     const uint8_t channel = doc["channel"] | 1;
     const float pct = constrain(doc["pct"] | 0.0f, 0.0f, 100.0f);

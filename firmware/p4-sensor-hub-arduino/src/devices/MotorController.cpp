@@ -4,6 +4,8 @@
 namespace {
 constexpr float kRsenseOhms = 0.05f;  // from Adafruit schematic for TMC2209
 constexpr uint8_t kDriverAddress = 0b00;
+constexpr uint16_t kMotorCurrentMa = 600;
+constexpr uint8_t kStallGuardThreshold = 0;
 }  // namespace
 
 MotorController::MotorController(HardwareSerial& serial)
@@ -18,20 +20,24 @@ void MotorController::begin() {
   pinMode(Pins::kMotorEndstop, Config::kEndstopActiveLow ? INPUT_PULLUP : INPUT_PULLDOWN);
 
   setEnabled(false);
-  serial_.begin(Config::kTmcBaud, SERIAL_8N1, Pins::kTmcUart, Pins::kTmcUart);
+  serial_.begin(Config::kTmcBaud, SERIAL_8N1, Pins::kTmcUartRx, Pins::kTmcUartTx);
 
-  driver_.begin();
-  driver_.pdn_disable(true);
-  driver_.I_scale_analog(false);
-  driver_.rms_current(300);
-  driver_.microsteps(Config::kMicrosteps);
-  driver_.toff(5);
-  driver_.en_spreadCycle(false);
-  driver_.pwm_autoscale(true);
-
+  configureDriver();
   stepper_.setMaxSpeed(Config::kMaxStageSpeedMmS * Config::kStepsPerMm);
   stepper_.setAcceleration(Config::kMaxStageAccelMmS2 * Config::kStepsPerMm);
   setEnabled(false);
+}
+
+void MotorController::configureDriver() {
+  driver_.begin();
+  driver_.pdn_disable(true);
+  driver_.I_scale_analog(false);
+  driver_.rms_current(kMotorCurrentMa);
+  driver_.microsteps(Config::kMicrosteps);
+  driver_.toff(5);
+  driver_.en_spreadCycle(true);
+  driver_.pwm_autoscale(true);
+  driver_.SGTHRS(kStallGuardThreshold);
 }
 
 void MotorController::service() {
@@ -108,4 +114,27 @@ void MotorController::setEnabled(bool enabled) {
   enabled_ = enabled;
   const bool pinLevel = Config::kMotorEnableActiveLow ? !enabled : enabled;
   digitalWrite(Pins::kMotorEnable, pinLevel ? HIGH : LOW);
+}
+
+TmcDriverDiagnostics MotorController::readDriverDiagnostics() {
+  TmcDriverDiagnostics diagnostics;
+  diagnostics.connection_result = driver_.test_connection();
+  diagnostics.ifcnt = driver_.IFCNT();
+  diagnostics.ioin = driver_.IOIN();
+  diagnostics.version = driver_.version();
+  diagnostics.drv_status = driver_.DRV_STATUS();
+  diagnostics.rms_current_ma = driver_.rms_current();
+  diagnostics.microsteps = driver_.microsteps();
+  return diagnostics;
+}
+
+TmcStallDiagnostics MotorController::readStallDiagnostics() {
+  TmcStallDiagnostics diagnostics;
+  diagnostics.sg_result = driver_.SG_RESULT();
+  diagnostics.sg_threshold = driver_.SGTHRS();
+  diagnostics.drv_status = driver_.DRV_STATUS();
+  diagnostics.diag_pin = digitalRead(Pins::kMotorDiag) == HIGH;
+  diagnostics.enabled = enabled_;
+  diagnostics.velocity_mode = velocityMode_;
+  return diagnostics;
 }
