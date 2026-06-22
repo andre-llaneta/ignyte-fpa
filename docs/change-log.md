@@ -14,6 +14,31 @@ Why:
 Verification:
 ```
 
+## 2026-06-22 - TMC2209 StallGuard4 Calibration And DIAG Interrupt
+
+What changed:
+
+- Configured the TMC2209 for StealthChop with tuned defaults `SGTHRS=35` and `TCOOLTHRS=1500`; runtime overrides remain available through `motor.stall_config`.
+- Added a rising-edge interrupt for the TMC2209 DIAG signal on GPIO 50. The ISR only latches the event; the motor task performs the stop and reporting.
+- Added runtime `motor.stall_config`, `motor.stall_status`, and bounded `motor.stall_test` commands.
+- Added bounded `motor.stall_home` automation that seeks negative, accepts StallGuard or the physical endstop as the reference, backs off one 2 mm screw revolution, and sets the backed-off position to zero.
+- Added readback for `SG_RESULT`, `SGTHRS`, `TSTEP`, `TCOOLTHRS`, `TPWMTHRS`, chopper mode, interrupt state, and test travel.
+- Added explicit completion events for stall detection, travel-limit completion, and physical-endstop completion.
+- Added a mutex-protected diagnostics path outside the motor pulse-generation task so SG_RESULT sampling does not block step servicing.
+- Added `Config::kMotorDirectionInverted` and enabled it so logical negative motion travels in the opposite physical direction without changing motor wiring or TMC UART shaft state.
+- Removed unused StallGuard accessors and the inactive D6F runtime object while GPIO 23 is assigned to TMC2209 UART TX.
+- Restored the sensor polling task after motor-only bring-up and moved `motor.driver_status` off the motor pulse-generation task.
+- The active branch uses `200` full steps/rev and `600 mA RMS`, superseding the earlier temporary `400` steps/rev and `300 mA RMS` bring-up values. The motor current still requires validation against the exact motor rating.
+- Documented the calibration and hardware bring-up procedure.
+
+Why:
+
+TMC2209 StallGuard4 produces a pulse on DIAG rather than a persistent software-readable event. Reliable calibration also depends on motor current, velocity, temperature, `SGTHRS`, and the `TCOOLTHRS >= TSTEP > TPWMTHRS` operating window. The firmware needed interrupt capture, bounded motion, and register readback before sensorless detection could be tested safely.
+
+Verification:
+
+PlatformIO build for `esp32-p4` completed successfully.
+
 ## 2026-06-16 - Motor Bring-Up Safety And GPIO48 Direction Fix
 
 What changed:

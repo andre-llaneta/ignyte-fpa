@@ -9,7 +9,6 @@
 #include "devices/IoExpander.h"
 #include "devices/MotorController.h"
 #include "devices/ProparAsciiClient.h"
-#include "sensors/AnalogD6FSensor.h"
 #include "sensors/Bme688Sensor.h"
 #include "sensors/Max31856Sensor.h"
 #include "sensors/Sht45Sensor.h"
@@ -31,8 +30,6 @@ Max31856Sensor tc3("tc3", Pins::kChipSelects[2], SensorRates::kTc);
 Max31856Sensor tc4("tc4", Pins::kChipSelects[3], SensorRates::kTc);
 Sht45Sensor sht45("sht45", Wire, SensorRates::kSht45);
 Bme688Sensor bme688("bme688", Wire, SensorRates::kBme688, Addresses::kBme688);
-AnalogD6FSensor d6f("d6f_v03a1", Pins::kD6fAnalog, SensorRates::kD6f);
-
 SensorBase* sensors[] = {
     &tc1,
     &tc2,
@@ -40,8 +37,6 @@ SensorBase* sensors[] = {
     &tc4,
     &sht45,
     &bme688,
-    // D6F is disabled during bidirectional TMC2209 UART bring-up because GPIO23 is TMC TX.
-    // &d6f,
 };
 
 constexpr size_t kSensorCount = sizeof(sensors) / sizeof(sensors[0]);
@@ -56,15 +51,18 @@ enum class MotorCommandType {
   Enable,
   Disable,
   ReportStatus,
-  DriverStatus,
   DriverConfigure,
-  StallStatus,
+  StallConfigure,
+  StallTest,
+  StallHome,
 };
 
 struct MotorCommand {
   MotorCommandType type;
   long steps = 0;
   float value = 0.0f;
+  uint32_t raw = 0;
+  float limit = 0.0f;
 };
 
 QueueHandle_t motorCommandQueue = nullptr;
@@ -156,10 +154,69 @@ void publishStallStatus() {
   doc["status"] = "stall_status";
   doc["sg_result"] = diagnostics.sg_result;
   doc["sg_threshold"] = diagnostics.sg_threshold;
+  doc["effective_sg_threshold"] = static_cast<uint16_t>(diagnostics.sg_threshold) * 2U;
+  doc["tstep"] = diagnostics.tstep;
+  doc["tcoolthrs"] = diagnostics.tcoolthrs;
+  doc["tpwmthrs"] = diagnostics.tpwmthrs;
   doc["drv_status"] = diagnostics.drv_status;
+  doc["diag_gpio"] = Pins::kMotorDiag;
   doc["diag_pin"] = diagnostics.diag_pin;
+  doc["diag_interrupt_pending"] = diagnostics.diag_interrupt_pending;
+  doc["stall_guard_armed"] = diagnostics.stall_guard_armed;
+  doc["stall_test_active"] = diagnostics.stall_test_active;
+  doc["stall_home_active"] = diagnostics.stall_home_active;
+  doc["stall_home_backing_off"] = diagnostics.stall_home_backing_off;
+  doc["spreadcycle_enabled"] = diagnostics.spreadcycle_enabled;
+  doc["stall_window_active"] =
+      !diagnostics.spreadcycle_enabled && diagnostics.tcoolthrs >= diagnostics.tstep &&
+      diagnostics.tstep > diagnostics.tpwmthrs;
   doc["enabled"] = diagnostics.enabled;
   doc["velocity_mode"] = diagnostics.velocity_mode;
+  doc["speed_mm_s"] = diagnostics.speed_mm_s;
+  doc["stall_test_travel_mm"] = diagnostics.stall_test_travel_mm;
+  doc["stall_home_travel_mm"] = diagnostics.stall_home_travel_mm;
+  telemetry.write(doc);
+}
+
+void publishMotorMotionEvent(MotorMotionEvent event) {
+  const char* status = nullptr;
+  const char* homeSource = nullptr;
+  switch (event) {
+    case MotorMotionEvent::StallDetected:
+      status = "stall_detected";
+      break;
+    case MotorMotionEvent::StallTestTravelLimit:
+      status = "stall_not_detected";
+      break;
+    case MotorMotionEvent::StallTestEndstop:
+      status = "stall_test_endstop";
+      break;
+    case MotorMotionEvent::StallHomeComplete:
+      status = "stall_home_complete";
+      homeSource = "stallguard";
+      break;
+    case MotorMotionEvent::StallHomeCompleteEndstop:
+      status = "stall_home_complete";
+      homeSource = "endstop";
+      break;
+    case MotorMotionEvent::StallHomeTravelLimit:
+      status = "stall_home_not_detected";
+      break;
+    case MotorMotionEvent::None:
+      return;
+  }
+
+  JsonDocument doc;
+  doc["type"] = "status";
+  doc["t_us"] = nowUs();
+  doc["component"] = "motor";
+  doc["status"] = status;
+  doc["position_steps"] = motor.positionSteps();
+  doc["position_mm"] = motor.positionMm();
+  doc["endstop_active"] = motor.endstopActive();
+  if (homeSource != nullptr) {
+    doc["home_source"] = homeSource;
+  }
   telemetry.write(doc);
 }
 
@@ -192,15 +249,31 @@ void applyMotorCommand(const MotorCommand& command) {
     case MotorCommandType::ReportStatus:
       publishMotorState("state");
       break;
-    case MotorCommandType::DriverStatus:
-      publishDriverStatus();
-      break;
     case MotorCommandType::DriverConfigure:
       motor.configureDriver();
       publishDriverStatus();
       break;
-    case MotorCommandType::StallStatus:
-      publishStallStatus();
+    case MotorCommandType::StallConfigure:
+      if (motor.configureStallGuard(static_cast<uint8_t>(command.steps), command.raw)) {
+        publishStatus("motor", "stall_configured");
+        publishStallStatus();
+      } else {
+        publishStatus("motor", "stall_config_rejected", "motor_must_be_stopped");
+      }
+      break;
+    case MotorCommandType::StallTest:
+      if (motor.startStallTest(command.value, command.limit)) {
+        publishStatus("motor", "stall_test_started");
+      } else {
+        publishStatus("motor", "stall_test_rejected", "check_enabled_idle_diag_and_limits");
+      }
+      break;
+    case MotorCommandType::StallHome:
+      if (motor.startStallHome(command.limit)) {
+        publishStatus("motor", "stall_home_started");
+      } else {
+        publishStatus("motor", "stall_home_rejected", "check_enabled_idle_diag_and_limits");
+      }
       break;
   }
 }
@@ -238,11 +311,63 @@ void handleCommand(JsonDocument& doc) {
   } else if (strcmp(cmd, "motor.status") == 0) {
     queueMotorCommand({MotorCommandType::ReportStatus, 0, 0.0f});
   } else if (strcmp(cmd, "motor.driver_status") == 0) {
-    queueMotorCommand({MotorCommandType::DriverStatus, 0, 0.0f});
+    publishDriverStatus();
   } else if (strcmp(cmd, "motor.driver_configure") == 0) {
     queueMotorCommand({MotorCommandType::DriverConfigure, 0, 0.0f});
   } else if (strcmp(cmd, "motor.stall_status") == 0) {
-    queueMotorCommand({MotorCommandType::StallStatus, 0, 0.0f});
+    // Keep blocking UART diagnostics out of the motor pulse-generation task.
+    publishStallStatus();
+  } else if (strcmp(cmd, "motor.stall_config") == 0) {
+    if (!doc["sgthrs"].is<int>()) {
+      publishStatus("motor", "missing_field", "sgthrs");
+      return;
+    }
+    if (!doc["tcoolthrs"].is<long>()) {
+      publishStatus("motor", "missing_field", "tcoolthrs");
+      return;
+    }
+
+    const int threshold = doc["sgthrs"].as<int>();
+    const long coolThreshold = doc["tcoolthrs"].as<long>();
+    if (threshold < 0 || threshold > 255 || coolThreshold < 0 || coolThreshold > 0xFFFFF) {
+      publishStatus("motor", "invalid_field", "stall_config_range");
+      return;
+    }
+
+    queueMotorCommand(
+        {MotorCommandType::StallConfigure, threshold, 0.0f, static_cast<uint32_t>(coolThreshold)});
+  } else if (strcmp(cmd, "motor.stall_test") == 0) {
+    if (!doc["mm_s"].is<float>()) {
+      publishStatus("motor", "missing_field", "mm_s");
+      return;
+    }
+    if (!doc["max_travel_mm"].is<float>()) {
+      publishStatus("motor", "missing_field", "max_travel_mm");
+      return;
+    }
+
+    const float velocityMmS = doc["mm_s"].as<float>();
+    const float maxTravelMm = doc["max_travel_mm"].as<float>();
+    if (velocityMmS == 0.0f || fabsf(velocityMmS) > Config::kMaxStageSpeedMmS ||
+        maxTravelMm <= 0.0f || maxTravelMm > Config::kMaxStallTestTravelMm) {
+      publishStatus("motor", "invalid_field", "stall_test_range");
+      return;
+    }
+
+    queueMotorCommand({MotorCommandType::StallTest, 0, velocityMmS, 0, maxTravelMm});
+  } else if (strcmp(cmd, "motor.stall_home") == 0) {
+    if (!doc["max_travel_mm"].is<float>()) {
+      publishStatus("motor", "missing_field", "max_travel_mm");
+      return;
+    }
+
+    const float maxTravelMm = doc["max_travel_mm"].as<float>();
+    if (maxTravelMm <= 0.0f || maxTravelMm > Config::kMaxStallHomeTravelMm) {
+      publishStatus("motor", "invalid_field", "stall_home_range");
+      return;
+    }
+
+    queueMotorCommand({MotorCommandType::StallHome, 0, 0.0f, 0, maxTravelMm});
   } else if (strcmp(cmd, "flow.set") == 0) {
     const uint8_t channel = doc["channel"] | 1;
     const float pct = constrain(doc["pct"] | 0.0f, 0.0f, 100.0f);
@@ -354,6 +479,7 @@ void motorTask(void*) {
     }
 
     motor.service();
+    publishMotorMotionEvent(motor.takeMotionEvent());
     delayMicroseconds(200);
     if (++yieldCounter >= 10) {
       yieldCounter = 0;
@@ -376,7 +502,7 @@ void setup() {
   bootWarnings = bootWarnings || !motorQueueOk;
 
   Wire.begin(Pins::kI2cSda, Pins::kI2cScl);
-  // SPI.begin(Pins::kSpiSck, Pins::kSpiMiso, Pins::kSpiMosi);
+  SPI.begin(Pins::kSpiSck, Pins::kSpiMiso, Pins::kSpiMosi);
 
   const bool ioExpanderOk = ioExpander.begin(Wire);
   publishStatus(
@@ -412,7 +538,8 @@ void setup() {
 
   xTaskCreate(motorTask, "motor", 4096, nullptr, 5, nullptr);
   xTaskCreate(commandTask, "commands", 6144, nullptr, 3, nullptr);
-  // xTaskCreate(sensorTask, "sensors", 8192, nullptr, 2, nullptr); # for motor bring up
+  // temp: for motor bring up
+  //xTaskCreate(sensorTask, "sensors", 8192, nullptr, 2, nullptr);
   xTaskCreate(flowTask, "flow", 6144, nullptr, 2, nullptr);
 
   publishStatus("boot", bootWarnings ? "ready_with_warnings" : "ready");
