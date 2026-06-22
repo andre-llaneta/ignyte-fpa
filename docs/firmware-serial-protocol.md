@@ -150,6 +150,109 @@ Sets the current logical motor position to `0` without moving the motor.
 
 Use this only when the physical stage is known to be at the desired home position.
 
+#### `motor.driver_status`
+
+Reads the TMC2209 UART connection and driver configuration.
+
+```json
+{"cmd":"motor.driver_status"}
+```
+
+#### `motor.driver_configure`
+
+Stops motion and reapplies the default TMC2209 configuration. This restores `SGTHRS=35` and `TCOOLTHRS=1500`, disables any active StallGuard test or homing sequence, and leaves the motor driver enable state unchanged.
+
+```json
+{"cmd":"motor.driver_configure"}
+```
+
+#### `motor.stall_config`
+
+Configures the TMC2209 StallGuard4 threshold and lower velocity-window register. The motor must be stopped and no StallGuard test may be active.
+
+```json
+{"cmd":"motor.stall_config","sgthrs":128,"tcoolthrs":1048575}
+```
+
+Fields:
+
+- `sgthrs`: integer `0..255`. `0` disables stall detection; larger values increase sensitivity. The effective comparison threshold is twice this register value.
+- `tcoolthrs`: integer `0..1048575` (`0xFFFFF`). StallGuard is active only when `TCOOLTHRS >= TSTEP > TPWMTHRS` and the TMC2209 is in StealthChop.
+
+Successful configuration emits `stall_configured` followed by a `stall_status` message. Invalid ranges emit `invalid_field`; attempts while moving emit `stall_config_rejected`.
+
+#### `motor.stall_status`
+
+Reads StallGuard registers and software state. This UART read runs outside the motor pulse-generation task so repeated calibration reads do not block motor servicing.
+
+```json
+{"cmd":"motor.stall_status"}
+```
+
+Important response fields:
+
+- `sg_result`, `sg_threshold`, `effective_sg_threshold`
+- `tstep`, `tcoolthrs`, `tpwmthrs`
+- `diag_gpio` (`50`) and current `diag_pin` level
+- `diag_interrupt_pending`, `stall_guard_armed`, `stall_test_active`
+- `stall_home_active`, `stall_home_backing_off`
+- `spreadcycle_enabled`, `stall_window_active`
+- `speed_mm_s`, `stall_test_travel_mm`
+- `stall_home_travel_mm`
+
+`stall_window_active` is a firmware convenience value indicating that the register readback currently satisfies the TMC2209 StallGuard4 mode/window condition. DIAG is handled as a pulse by a rising-edge GPIO interrupt; the current `diag_pin` level may already be low when status is requested.
+
+#### `motor.stall_test`
+
+Starts a bounded constant-velocity move and arms the GPIO 50 DIAG rising-edge interrupt.
+
+```json
+{"cmd":"motor.stall_test","mm_s":-1.0,"max_travel_mm":5.0}
+```
+
+Fields:
+
+- `mm_s`: nonzero signed velocity, limited to `-8..8 mm/s`.
+- `max_travel_mm`: positive travel limit, no greater than `10 mm`.
+
+The motor must already be enabled and idle, and DIAG must be low before the test starts. The command is rejected otherwise. Ordinary movement commands never arm StallGuard.
+
+The test finishes with one of these status values:
+
+- `stall_detected`: a DIAG pulse was captured and step generation stopped immediately.
+- `stall_not_detected`: the travel limit was reached without a DIAG pulse.
+- `stall_test_endstop`: the physical endstop stopped negative travel first.
+
+All completion paths disarm the interrupt. The driver remains enabled to hold the vertical stage.
+
+#### `motor.stall_home`
+
+Runs a complete bounded sensorless homing sequence using the configured StallGuard values:
+
+```json
+{"cmd":"motor.stall_home","max_travel_mm":70.0}
+```
+
+Fields:
+
+- `max_travel_mm`: required positive seek limit, no greater than `100 mm`. Set this only as large as needed to reach the home side from the current position.
+
+The motor must already be enabled and idle, and DIAG must be low. The sequence then:
+
+1. Moves toward home at `-1 mm/s` with StallGuard armed.
+2. Stops immediately on a DIAG pulse or physical endstop.
+3. Disarms StallGuard and moves `+2 mm`, equal to one configured lead-screw revolution.
+4. Sets the backed-off position to logical `0 mm`.
+
+Expected responses are:
+
+```json
+{"type":"status","component":"motor","status":"stall_home_started"}
+{"type":"status","component":"motor","status":"stall_home_complete","home_source":"stallguard","position_mm":0}
+```
+
+If the physical endstop is reached first, completion uses `"home_source":"endstop"`. If neither source is reached before the travel bound, the firmware stops and emits `stall_home_not_detected`; it does not set the position to zero.
+
 ### Flow Commands
 
 #### `flow.set`
@@ -192,7 +295,7 @@ or:
 Changes the polling rate for a sensor.
 
 ```json
-{"cmd":"sensor.rate","sensor":"d6f_v03a1","hz":1}
+{"cmd":"sensor.rate","sensor":"tc1","hz":1}
 ```
 
 Fields:
@@ -208,14 +311,15 @@ Known sensor names:
 - `tc4`
 - `sht45`
 - `bme688`
-- `d6f_v03a1`
+
+The `d6f_v03a1` implementation remains in the repository but is not instantiated in this build because GPIO 23 is used as the TMC2209 UART TX pin.
 
 Setting `hz` to `0` disables scheduled reads for that sensor.
 
 Expected responses:
 
 ```json
-{"type":"status","t_us":123456789,"component":"d6f_v03a1","status":"rate_updated"}
+{"type":"status","t_us":123456789,"component":"tc1","status":"rate_updated"}
 ```
 
 or:
@@ -384,6 +488,8 @@ Fields:
 
 #### D6F Analog Flow Velocity Samples
 
+This sample type is currently unavailable in the ESP32-P4 build because the D6F analog pin conflicts with TMC2209 UART TX on GPIO 23. The message shape is retained here for future hardware revisions.
+
 Sensor: `d6f_v03a1`.
 
 ```json
@@ -462,8 +568,44 @@ The host should wait for `ready` or `ready_with_warnings` before sending normal 
 - The motor driver is intentionally disabled after boot. The host must send `motor.enable` before motion.
 - Negative absolute motor targets are clamped to `0`.
 - `motor.stop` is a controlled stop, not an emergency power cutoff.
-- TMC2209 UART is currently treated mostly as write-only unless a separate RX bodge/revision is added.
-- During motor-only bring-up, the firmware may temporarily have `sensorTask` disabled in `main.cpp`. In that mode, sensor `sample` messages will not be emitted even though startup status messages still appear.
+- TMC2209 bidirectional UART readback is required for driver and StallGuard diagnostics.
+- TMC2209 StallGuard4 is configured for StealthChop and starts with the tuned defaults `SGTHRS=35` and `TCOOLTHRS=1500`. DIAG is still ignored during ordinary movement unless a bounded test or homing sequence explicitly arms it.
+- GPIO 50 is the TMC2209 DIAG input. It is captured with a rising-edge interrupt only while a bounded stall test is active.
+
+## StallGuard4 Bring-Up Procedure
+
+1. Put the stage near the center of travel. Keep the physical endstop connected and do not use fingers as the mechanical test load.
+2. Flash the firmware, then enable the motor and verify TMC2209 UART:
+
+   ```json
+   {"cmd":"motor.enable"}
+   {"cmd":"motor.driver_status"}
+   ```
+
+   Require `connection_ok: true` and sensible current and microstep readback.
+
+3. Confirm DIAG is low and the default StallGuard configuration was applied:
+
+   ```json
+   {"cmd":"motor.stall_status"}
+   ```
+
+   Expect `diag_gpio: 50`, `diag_pin: false`, `stall_guard_armed: false`, `sg_threshold: 35`, and `tcoolthrs: 1500`.
+
+4. Choose a fixed calibration velocity. With the configured 2 mm lead screw, `1 mm/s` equals one motor revolution every two seconds and is a reasonable initial value.
+5. Move at the calibration velocity and request `motor.stall_status` repeatedly while applying a controlled, gradually increasing mechanical load. Record the lowest `SG_RESULT` before a stall, then stop the motor.
+6. Use half that minimum as the initial `SGTHRS`. Measure `TSTEP` at the lower end of the desired speed range and choose `TCOOLTHRS` so `TCOOLTHRS >= TSTEP > TPWMTHRS` in the intended operating window.
+7. Configure the candidate values while stopped:
+
+   ```json
+   {"cmd":"motor.stall_config","sgthrs":128,"tcoolthrs":1048575}
+   ```
+
+8. First verify the DIAG signal path with `SGTHRS=255` and a short bounded test. It should trigger immediately or after very little motion. If it reaches the travel limit, stop testing and inspect StealthChop mode, register readback, and GPIO 50 wiring.
+9. Restore the calculated threshold and run bounded tests from the center of travel. Wait at least two seconds between attempts and move away from the mechanical stop after each detection.
+10. Decrease `SGTHRS` for premature triggers. Increase it if the motor physically stalls without a DIAG event.
+11. Repeat at 75%, 100%, and 150% of the intended velocity, at expected load extremes, and after the motor reaches operating temperature.
+12. Promote values to firmware defaults only after reliable hardware results. Keep the physical endstop as the independent safety backup.
 
 ## Host Parser Recommendations
 

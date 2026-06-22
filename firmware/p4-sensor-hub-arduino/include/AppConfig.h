@@ -11,14 +11,13 @@ constexpr uint8_t kSpiMosi = 29;
 constexpr uint8_t kSpiMiso = 30;
 constexpr uint8_t kChipSelects[] = {21, 20, 36, 35, 34, 31};
 
-constexpr uint8_t kD6fAnalog = 23;  // A3
-
 constexpr uint8_t kMotorDir = 48;
 constexpr uint8_t kMotorStep = 49;
 constexpr uint8_t kMotorDiag = 50;
 constexpr uint8_t kMotorIndex = 52;
 constexpr uint8_t kMotorEndstop = 51;
-constexpr uint8_t kTmcUart = 32;
+constexpr uint8_t kTmcUartRx = 32;
+constexpr uint8_t kTmcUartTx = 23;
 constexpr uint8_t kMotorEnable = 33;
 
 constexpr uint8_t kFlow1Tx = 4;
@@ -44,7 +43,6 @@ namespace SensorRates {
 constexpr uint16_t kTc = 10;      // 10 Hz
 constexpr uint16_t kSht45 = 2;   // 2 Hz
 constexpr uint16_t kBme688 = 2; // 2 Hz
-constexpr uint16_t kD6f = 50;      // 50 Hz
 }  // namespace SensorRates
 
 namespace Config {
@@ -54,7 +52,7 @@ constexpr uint32_t kTmcBaud = 115200;
 
 constexpr uint8_t kBronkhorstNodePointToPoint = 0x80;
 
-constexpr float kStepperFullStepsPerRev = 400.0f;
+constexpr float kStepperFullStepsPerRev = 200.0f;
 constexpr float kLeadScrewMmPerRev = 2.0f;
 constexpr uint16_t kMicrosteps = 16;
 constexpr float kStepsPerMm =
@@ -62,6 +60,13 @@ constexpr float kStepsPerMm =
 
 constexpr float kMaxStageSpeedMmS = 8.0f;
 constexpr float kMaxStageAccelMmS2 = 20.0f;
+constexpr float kMaxStallTestTravelMm = 10.0f;
+constexpr uint8_t kStallGuardThreshold = 35;
+constexpr uint32_t kStallGuardCoolThreshold = 1500;
+constexpr float kStallHomeVelocityMmS = -1.0f;
+constexpr float kStallHomeBackoffMm = kLeadScrewMmPerRev;
+constexpr float kMaxStallHomeTravelMm = 100.0f;
+constexpr bool kMotorDirectionInverted = false;
 constexpr bool kMotorEnableActiveLow = true;
 constexpr bool kEndstopActiveLow = true;
 }  // namespace Config

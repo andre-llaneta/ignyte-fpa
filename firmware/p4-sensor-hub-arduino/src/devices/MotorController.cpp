@@ -4,7 +4,12 @@
 namespace {
 constexpr float kRsenseOhms = 0.05f;  // from Adafruit schematic for TMC2209
 constexpr uint8_t kDriverAddress = 0b00;
+constexpr uint16_t kMotorCurrentMa = 600;
+constexpr uint32_t kMaxTcoolthrs = 0xFFFFF;
 }  // namespace
+
+volatile bool MotorController::diagInterruptArmed_ = false;
+volatile bool MotorController::diagInterruptPending_ = false;
 
 MotorController::MotorController(HardwareSerial& serial)
     : serial_(serial),
@@ -17,21 +22,36 @@ void MotorController::begin() {
   pinMode(Pins::kMotorIndex, INPUT);
   pinMode(Pins::kMotorEndstop, Config::kEndstopActiveLow ? INPUT_PULLUP : INPUT_PULLDOWN);
 
-  setEnabled(false);
-  serial_.begin(Config::kTmcBaud, SERIAL_8N1, Pins::kTmcUart, Pins::kTmcUart);
+  driverMutex_ = xSemaphoreCreateMutex();
+  attachInterrupt(digitalPinToInterrupt(Pins::kMotorDiag), handleDiagInterrupt, RISING);
 
+  setEnabled(false);
+  serial_.begin(Config::kTmcBaud, SERIAL_8N1, Pins::kTmcUartRx, Pins::kTmcUartTx);
+
+  configureDriver();
+  stepper_.setPinsInverted(Config::kMotorDirectionInverted, false, false);
+  stepper_.setMaxSpeed(Config::kMaxStageSpeedMmS * Config::kStepsPerMm);
+  stepper_.setAcceleration(Config::kMaxStageAccelMmS2 * Config::kStepsPerMm);
+  setEnabled(false);
+}
+
+void MotorController::configureDriver() {
+  stopImmediately();
+  cancelStallMotion();
+
+  lockDriver();
   driver_.begin();
   driver_.pdn_disable(true);
   driver_.I_scale_analog(false);
-  driver_.rms_current(300);
+  driver_.rms_current(kMotorCurrentMa);
   driver_.microsteps(Config::kMicrosteps);
   driver_.toff(5);
   driver_.en_spreadCycle(false);
   driver_.pwm_autoscale(true);
-
-  stepper_.setMaxSpeed(Config::kMaxStageSpeedMmS * Config::kStepsPerMm);
-  stepper_.setAcceleration(Config::kMaxStageAccelMmS2 * Config::kStepsPerMm);
-  setEnabled(false);
+  driver_.TPWMTHRS(0);
+  driver_.TCOOLTHRS(Config::kStallGuardCoolThreshold);
+  driver_.SGTHRS(Config::kStallGuardThreshold);
+  unlockDriver();
 }
 
 void MotorController::service() {
@@ -40,9 +60,33 @@ void MotorController::service() {
   }
 
   if (endstopActive() && stepper_.speed() < 0.0f) {
+    const StallMotionMode mode = stallMotionMode_;
     stepper_.setCurrentPosition(0);
-    stepper_.stop();
-    velocityMode_ = false;
+    stopImmediately();
+    disarmStallGuard();
+    if (mode == StallMotionMode::HomeSeek) {
+      startHomeBackoff(true);
+    } else {
+      cancelStallMotion();
+      if (mode == StallMotionMode::Test) {
+        motionEvent_ = MotorMotionEvent::StallTestEndstop;
+      }
+    }
+    return;
+  }
+
+  if ((stallMotionMode_ == StallMotionMode::Test ||
+       stallMotionMode_ == StallMotionMode::HomeSeek) &&
+      diagInterruptPending_) {
+    const StallMotionMode mode = stallMotionMode_;
+    stopImmediately();
+    disarmStallGuard();
+    if (mode == StallMotionMode::HomeSeek) {
+      startHomeBackoff(false);
+    } else {
+      cancelStallMotion();
+      motionEvent_ = MotorMotionEvent::StallDetected;
+    }
     return;
   }
 
@@ -51,14 +95,38 @@ void MotorController::service() {
   } else {
     stepper_.run();
   }
+
+  if ((stallMotionMode_ == StallMotionMode::Test ||
+       stallMotionMode_ == StallMotionMode::HomeSeek) &&
+      labs(stepper_.currentPosition() - stallTestStartSteps_) >= stallTestMaxTravelSteps_) {
+    const StallMotionMode mode = stallMotionMode_;
+    stopImmediately();
+    cancelStallMotion();
+    motionEvent_ = mode == StallMotionMode::HomeSeek
+                       ? MotorMotionEvent::StallHomeTravelLimit
+                       : MotorMotionEvent::StallTestTravelLimit;
+    return;
+  }
+
+  if (stallMotionMode_ == StallMotionMode::HomeBackoff &&
+      labs(stepper_.currentPosition() - stallTestStartSteps_) >= stallHomeBackoffSteps_) {
+    const bool endstopTriggered = stallHomeEndstopTriggered_;
+    stopImmediately();
+    stepper_.setCurrentPosition(0);
+    cancelStallMotion();
+    motionEvent_ = endstopTriggered ? MotorMotionEvent::StallHomeCompleteEndstop
+                                    : MotorMotionEvent::StallHomeComplete;
+  }
 }
 
 void MotorController::stop() {
+  cancelStallMotion();
   velocityMode_ = false;
   stepper_.stop();
 }
 
 void MotorController::moveToSteps(long steps) {
+  cancelStallMotion();
   velocityMode_ = false;
   if (steps < 0) {
     steps = 0;
@@ -71,11 +139,13 @@ void MotorController::moveToMm(float mm) {
 }
 
 void MotorController::setVelocityMmS(float velocityMmS) {
+  cancelStallMotion();
   velocityMode_ = true;
   stepper_.setSpeed(velocityMmS * Config::kStepsPerMm);
 }
 
 void MotorController::homeHere() {
+  cancelStallMotion();
   stepper_.setCurrentPosition(0);
 }
 
@@ -108,4 +178,175 @@ void MotorController::setEnabled(bool enabled) {
   enabled_ = enabled;
   const bool pinLevel = Config::kMotorEnableActiveLow ? !enabled : enabled;
   digitalWrite(Pins::kMotorEnable, pinLevel ? HIGH : LOW);
+}
+
+bool MotorController::configureStallGuard(uint8_t threshold, uint32_t coolThreshold) {
+  if (coolThreshold > kMaxTcoolthrs || stallMotionMode_ != StallMotionMode::None ||
+      velocityMode_ ||
+      stepper_.distanceToGo() != 0) {
+    return false;
+  }
+
+  lockDriver();
+  driver_.SGTHRS(threshold);
+  driver_.TCOOLTHRS(coolThreshold);
+  unlockDriver();
+  return true;
+}
+
+bool MotorController::startStallTest(float velocityMmS, float maxTravelMm) {
+  if (!enabled_ || velocityMmS == 0.0f || maxTravelMm <= 0.0f ||
+      maxTravelMm > Config::kMaxStallTestTravelMm || velocityMode_ ||
+      stepper_.distanceToGo() != 0 ||
+      fabsf(velocityMmS) > Config::kMaxStageSpeedMmS ||
+      digitalRead(Pins::kMotorDiag) == HIGH) {
+    return false;
+  }
+
+  const long maxTravelSteps = static_cast<long>(maxTravelMm * Config::kStepsPerMm);
+  if (maxTravelSteps <= 0) {
+    return false;
+  }
+
+  stopImmediately();
+  motionEvent_ = MotorMotionEvent::None;
+  stallTestStartSteps_ = stepper_.currentPosition();
+  stallTestMaxTravelSteps_ = maxTravelSteps;
+  stallMotionMode_ = StallMotionMode::Test;
+  velocityMode_ = true;
+  stepper_.setSpeed(velocityMmS * Config::kStepsPerMm);
+  armStallGuard();
+  return true;
+}
+
+bool MotorController::startStallHome(float maxTravelMm) {
+  if (!enabled_ || maxTravelMm <= 0.0f || maxTravelMm > Config::kMaxStallHomeTravelMm ||
+      velocityMode_ || stepper_.distanceToGo() != 0 ||
+      digitalRead(Pins::kMotorDiag) == HIGH) {
+    return false;
+  }
+
+  const long maxTravelSteps = static_cast<long>(maxTravelMm * Config::kStepsPerMm);
+  const long backoffSteps =
+      static_cast<long>(Config::kStallHomeBackoffMm * Config::kStepsPerMm);
+  if (maxTravelSteps <= 0 || backoffSteps <= 0) {
+    return false;
+  }
+
+  stopImmediately();
+  motionEvent_ = MotorMotionEvent::None;
+  stallTestStartSteps_ = stepper_.currentPosition();
+  stallTestMaxTravelSteps_ = maxTravelSteps;
+  stallHomeBackoffSteps_ = backoffSteps;
+  stallHomeEndstopTriggered_ = false;
+  stallMotionMode_ = StallMotionMode::HomeSeek;
+  velocityMode_ = true;
+  stepper_.setSpeed(Config::kStallHomeVelocityMmS * Config::kStepsPerMm);
+  armStallGuard();
+  return true;
+}
+
+bool MotorController::stallHomeActive() const {
+  return stallMotionMode_ == StallMotionMode::HomeSeek ||
+         stallMotionMode_ == StallMotionMode::HomeBackoff;
+}
+
+MotorMotionEvent MotorController::takeMotionEvent() {
+  const MotorMotionEvent event = motionEvent_;
+  motionEvent_ = MotorMotionEvent::None;
+  return event;
+}
+
+TmcDriverDiagnostics MotorController::readDriverDiagnostics() {
+  TmcDriverDiagnostics diagnostics;
+  lockDriver();
+  diagnostics.connection_result = driver_.test_connection();
+  diagnostics.ifcnt = driver_.IFCNT();
+  diagnostics.ioin = driver_.IOIN();
+  diagnostics.version = driver_.version();
+  diagnostics.drv_status = driver_.DRV_STATUS();
+  diagnostics.rms_current_ma = driver_.rms_current();
+  diagnostics.microsteps = driver_.microsteps();
+  unlockDriver();
+  return diagnostics;
+}
+
+TmcStallDiagnostics MotorController::readStallDiagnostics() {
+  TmcStallDiagnostics diagnostics;
+  lockDriver();
+  diagnostics.sg_result = driver_.SG_RESULT();
+  diagnostics.sg_threshold = driver_.SGTHRS();
+  diagnostics.tstep = driver_.TSTEP();
+  diagnostics.tcoolthrs = driver_.TCOOLTHRS();
+  diagnostics.tpwmthrs = driver_.TPWMTHRS();
+  diagnostics.drv_status = driver_.DRV_STATUS();
+  diagnostics.spreadcycle_enabled = driver_.en_spreadCycle();
+  unlockDriver();
+
+  diagnostics.diag_pin = digitalRead(Pins::kMotorDiag) == HIGH;
+  diagnostics.diag_interrupt_pending = diagInterruptPending_;
+  diagnostics.stall_guard_armed = diagInterruptArmed_;
+  diagnostics.stall_test_active = stallMotionMode_ == StallMotionMode::Test;
+  diagnostics.stall_home_active = stallHomeActive();
+  diagnostics.stall_home_backing_off = stallMotionMode_ == StallMotionMode::HomeBackoff;
+  diagnostics.enabled = enabled_;
+  diagnostics.velocity_mode = velocityMode_;
+  diagnostics.speed_mm_s = stepper_.speed() / Config::kStepsPerMm;
+  const float stallTravelMm =
+      static_cast<float>(labs(stepper_.currentPosition() - stallTestStartSteps_)) /
+      Config::kStepsPerMm;
+  diagnostics.stall_test_travel_mm =
+      stallMotionMode_ == StallMotionMode::Test ? stallTravelMm : 0.0f;
+  diagnostics.stall_home_travel_mm = stallHomeActive() ? stallTravelMm : 0.0f;
+  return diagnostics;
+}
+
+void IRAM_ATTR MotorController::handleDiagInterrupt() {
+  if (diagInterruptArmed_) {
+    diagInterruptPending_ = true;
+  }
+}
+
+void MotorController::armStallGuard() {
+  noInterrupts();
+  diagInterruptPending_ = false;
+  diagInterruptArmed_ = true;
+  interrupts();
+}
+
+void MotorController::disarmStallGuard() {
+  noInterrupts();
+  diagInterruptArmed_ = false;
+  diagInterruptPending_ = false;
+  interrupts();
+}
+
+void MotorController::cancelStallMotion() {
+  stallMotionMode_ = StallMotionMode::None;
+  disarmStallGuard();
+}
+
+void MotorController::startHomeBackoff(bool endstopTriggered) {
+  stallHomeEndstopTriggered_ = endstopTriggered;
+  stallTestStartSteps_ = stepper_.currentPosition();
+  stallMotionMode_ = StallMotionMode::HomeBackoff;
+  velocityMode_ = true;
+  stepper_.setSpeed(fabsf(Config::kStallHomeVelocityMmS) * Config::kStepsPerMm);
+}
+
+void MotorController::stopImmediately() {
+  velocityMode_ = false;
+  stepper_.setCurrentPosition(stepper_.currentPosition());
+}
+
+void MotorController::lockDriver() {
+  if (driverMutex_ != nullptr) {
+    xSemaphoreTake(driverMutex_, portMAX_DELAY);
+  }
+}
+
+void MotorController::unlockDriver() {
+  if (driverMutex_ != nullptr) {
+    xSemaphoreGive(driverMutex_);
+  }
 }
