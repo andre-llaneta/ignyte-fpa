@@ -290,6 +290,55 @@ or:
 
 ### Sensor Commands
 
+#### `i2c.scan`
+
+Scans the configured I2C bus on SDA GPIO 7 and SCL GPIO 8.
+
+```json
+{"cmd":"i2c.scan"}
+```
+
+Expected response:
+
+```json
+{"type":"status","t_us":123456789,"component":"i2c","status":"scan","addresses":[32,68,119],"count":3}
+```
+
+Expected full-board addresses:
+
+- `0x20` / decimal `32`: MCP23017 I/O expander.
+- `0x44` / decimal `68`: SHT45.
+- `0x77` / decimal `119`: BME688, if the board uses the configured address.
+
+If BME688 appears as decimal `118` / `0x76`, update `Addresses::kBme688` in `AppConfig.h`.
+
+#### `sensor.status`
+
+Reports which sensors initialized successfully and their current scheduled polling rates.
+
+```json
+{"cmd":"sensor.status"}
+```
+
+Expected response:
+
+```json
+{
+  "type": "status",
+  "t_us": 123456789,
+  "component": "sensor",
+  "status": "state",
+  "sensors": [
+    {"name":"tc1","online":true,"rate_hz":10},
+    {"name":"tc2","online":true,"rate_hz":10},
+    {"name":"tc3","online":true,"rate_hz":10},
+    {"name":"tc4","online":true,"rate_hz":10},
+    {"name":"sht45","online":true,"rate_hz":2},
+    {"name":"bme688","online":true,"rate_hz":2}
+  ]
+}
+```
+
 #### `sensor.rate`
 
 Changes the polling rate for a sensor.

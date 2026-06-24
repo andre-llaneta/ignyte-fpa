@@ -97,6 +97,45 @@ SensorBase* findSensor(const char* name) {
   return nullptr;
 }
 
+void publishSensorStatus() {
+  JsonDocument doc;
+  doc["type"] = "status";
+  doc["t_us"] = nowUs();
+  doc["component"] = "sensor";
+  doc["status"] = "state";
+  JsonArray sensorList = doc["sensors"].to<JsonArray>();
+
+  for (size_t i = 0; i < kSensorCount; ++i) {
+    JsonObject item = sensorList.add<JsonObject>();
+    item["name"] = sensors[i]->name();
+    item["online"] = sensorOnline[i];
+    item["rate_hz"] = sensors[i]->rateHz();
+  }
+
+  telemetry.write(doc);
+}
+
+void publishI2cScan() {
+  JsonDocument doc;
+  doc["type"] = "status";
+  doc["t_us"] = nowUs();
+  doc["component"] = "i2c";
+  doc["status"] = "scan";
+  JsonArray addresses = doc["addresses"].to<JsonArray>();
+
+  uint8_t count = 0;
+  for (uint8_t address = 1; address < 127; ++address) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() == 0) {
+      addresses.add(address);
+      ++count;
+    }
+  }
+
+  doc["count"] = count;
+  telemetry.write(doc);
+}
+
 // helper function to queue a motor command; returns true if successful, false if the queue is full or missing
 bool queueMotorCommand(const MotorCommand& command) {
   if (motorCommandQueue == nullptr) {
@@ -368,6 +407,10 @@ void handleCommand(JsonDocument& doc) {
     }
 
     queueMotorCommand({MotorCommandType::StallHome, 0, 0.0f, 0, maxTravelMm});
+  } else if (strcmp(cmd, "sensor.status") == 0) {
+    publishSensorStatus();
+  } else if (strcmp(cmd, "i2c.scan") == 0) {
+    publishI2cScan();
   } else if (strcmp(cmd, "flow.set") == 0) {
     const uint8_t channel = doc["channel"] | 1;
     const float pct = constrain(doc["pct"] | 0.0f, 0.0f, 100.0f);
@@ -538,7 +581,6 @@ void setup() {
 
   xTaskCreate(motorTask, "motor", 4096, nullptr, 5, nullptr);
   xTaskCreate(commandTask, "commands", 6144, nullptr, 3, nullptr);
-  // temp: for motor bring up
   //xTaskCreate(sensorTask, "sensors", 8192, nullptr, 2, nullptr);
   xTaskCreate(flowTask, "flow", 6144, nullptr, 2, nullptr);
 

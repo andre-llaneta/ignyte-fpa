@@ -14,6 +14,50 @@ Why:
 Verification:
 ```
 
+## 2026-06-24 - JSON Command Reference
+
+What changed:
+
+- Added `docs/jsoncommands.md` as a standalone quick reference for every newline-delimited JSON command, including required inputs, normal responses, rejected responses, and automatic sample/status outputs.
+
+Why:
+
+The firmware now has enough motor, StallGuard, flow, I2C, and sensor bring-up commands that the protocol needed a concise operator-facing command sheet.
+
+Verification:
+
+Cross-checked the command list against `handleCommand()` in `main.cpp`.
+
+## 2026-06-23 - Full Board Sensor Bring-Up Commands
+
+What changed:
+
+- Re-enabled the sensor polling task for full-board I2C/SPI bring-up.
+- Added `i2c.scan` to report detected I2C device addresses on the configured SDA/SCL pins.
+- Added `sensor.status` to report each instantiated sensor's startup state and polling rate.
+
+Why:
+
+The full board needs a direct way to distinguish bus/address problems from individual sensor driver failures during bring-up.
+
+Verification:
+
+Pending hardware validation on the assembled full board.
+
+## 2026-06-23 - New Motor StallGuard Threshold
+
+What changed:
+
+- Retuned the default TMC2209 StallGuard4 threshold from `SGTHRS=35` to `SGTHRS=55` for the new motor. Runtime overrides remain available through `motor.stall_config`.
+
+Why:
+
+The new motor needed a higher StallGuard threshold to detect the intended stall point reliably during sensorless homing.
+
+Verification:
+
+Hardware testing on the new motor verified `SGTHRS=55` as the working threshold.
+
 ## 2026-06-22 - TMC2209 StallGuard4 Calibration And DIAG Interrupt
 
 What changed:

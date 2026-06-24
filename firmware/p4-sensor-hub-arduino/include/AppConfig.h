@@ -40,8 +40,8 @@ constexpr uint8_t kSht45 = 0x44;
 }  // namespace Addresses
 
 namespace SensorRates {
-constexpr uint16_t kTc = 10;      // 10 Hz
-constexpr uint16_t kSht45 = 2;   // 2 Hz
+constexpr uint16_t kTc = 1;      // 10 Hz
+constexpr uint16_t kSht45 = 10;   // 2 Hz
 constexpr uint16_t kBme688 = 2; // 2 Hz
 }  // namespace SensorRates
 
@@ -61,9 +61,9 @@ constexpr float kStepsPerMm =
 constexpr float kMaxStageSpeedMmS = 8.0f;
 constexpr float kMaxStageAccelMmS2 = 20.0f;
 constexpr float kMaxStallTestTravelMm = 10.0f;
-constexpr uint8_t kStallGuardThreshold = 35;
+constexpr uint8_t kStallGuardThreshold = 55;
 constexpr uint32_t kStallGuardCoolThreshold = 1500;
-constexpr float kStallHomeVelocityMmS = -1.0f;
+constexpr float kStallHomeVelocityMmS = -2.0f;
 constexpr float kStallHomeBackoffMm = kLeadScrewMmPerRev;
 constexpr float kMaxStallHomeTravelMm = 100.0f;
 constexpr bool kMotorDirectionInverted = false;
