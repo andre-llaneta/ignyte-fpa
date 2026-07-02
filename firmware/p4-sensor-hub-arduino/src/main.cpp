@@ -48,7 +48,6 @@ bool sensorOnline[kSensorCount] = {};
 enum class MotorCommandType {
   MoveSteps,
   TargetMm,
-  VelocityMmS,
   Stop,
   HomeHere,
   Enable,
@@ -58,6 +57,7 @@ enum class MotorCommandType {
   StallConfigure,
   StallTest,
   StallHome,
+  CalibrateAxis,
 };
 
 struct MotorCommand {
@@ -68,9 +68,18 @@ struct MotorCommand {
   float limit = 0.0f;
 };
 
+struct MotorVelocityCommand {
+  float value = 0.0f;
+  uint32_t receivedMs = 0;
+};
+
 QueueHandle_t motorCommandQueue = nullptr;
+QueueHandle_t motorVelocityQueue = nullptr;
 SemaphoreHandle_t i2cBusMutex = nullptr;
 SemaphoreHandle_t spiBusMutex = nullptr;
+
+uint32_t lastVelocityCommandMs = 0;
+bool velocityWatchdogArmed = false;
 
 constexpr size_t kTcSensorIndices[] = {0, 1, 2, 3};
 constexpr size_t kFastI2cSensorIndices[] = {4, 6};
@@ -167,6 +176,42 @@ bool queueMotorCommand(const MotorCommand& command) {
   return true;
 }
 
+void clearMotorVelocityCommandState() {
+  if (motorVelocityQueue != nullptr) {
+    xQueueReset(motorVelocityQueue);
+  }
+  velocityWatchdogArmed = false;
+  lastVelocityCommandMs = 0;
+}
+
+void cancelMotorVelocityControl() {
+  clearMotorVelocityCommandState();
+  if (motor.velocityMode()) {
+    motor.stop();
+  }
+}
+
+bool queueMotorVelocityCommand(float velocityMmS) {
+  if (motor.calibrationActive()) {
+    publishStatus("motor", "velocity_rejected", "calibration_active");
+    return false;
+  }
+
+  if (motorVelocityQueue == nullptr) {
+    publishStatus("motor", "velocity_mailbox_missing");
+    return false;
+  }
+
+  const MotorVelocityCommand command{velocityMmS, millis()};
+  if (xQueueOverwrite(motorVelocityQueue, &command) != pdTRUE) {
+    publishStatus("motor", "velocity_mailbox_failed");
+    return false;
+  }
+
+  publishStatus("motor", "command_queued");
+  return true;
+}
+
 void publishMotorState(const char* status) {
   JsonDocument doc;
   doc["type"] = "status";
@@ -176,6 +221,10 @@ void publishMotorState(const char* status) {
   doc["enabled"] = motor.enabled();
   doc["endstop_active"] = motor.endstopActive();
   doc["velocity_mode"] = motor.velocityMode();
+  doc["calibration_active"] = motor.calibrationActive();
+  doc["limits_valid"] = motor.limitsValid();
+  doc["min_limit_mm"] = motor.minLimitMm();
+  doc["max_limit_mm"] = motor.maxLimitMm();
   doc["position_steps"] = motor.positionSteps();
   doc["position_mm"] = motor.positionMm();
   telemetry.write(doc);
@@ -256,6 +305,18 @@ void publishMotorMotionEvent(MotorMotionEvent event) {
     case MotorMotionEvent::StallHomeTravelLimit:
       status = "stall_home_not_detected";
       break;
+    case MotorMotionEvent::AxisCalibrationMinSet:
+      status = "axis_calibration_min_set";
+      break;
+    case MotorMotionEvent::AxisCalibrationComplete:
+      status = "axis_calibration_complete";
+      break;
+    case MotorMotionEvent::AxisCalibrationTravelLimit:
+      status = "axis_calibration_failed";
+      break;
+    case MotorMotionEvent::SoftwareLimitHit:
+      status = "software_limit_hit";
+      break;
     case MotorMotionEvent::None:
       return;
   }
@@ -268,6 +329,10 @@ void publishMotorMotionEvent(MotorMotionEvent event) {
   doc["position_steps"] = motor.positionSteps();
   doc["position_mm"] = motor.positionMm();
   doc["endstop_active"] = motor.endstopActive();
+  doc["calibration_active"] = motor.calibrationActive();
+  doc["limits_valid"] = motor.limitsValid();
+  doc["min_limit_mm"] = motor.minLimitMm();
+  doc["max_limit_mm"] = motor.maxLimitMm();
   if (homeSource != nullptr) {
     doc["home_source"] = homeSource;
   }
@@ -276,15 +341,16 @@ void publishMotorMotionEvent(MotorMotionEvent event) {
 
 // helper function to apply a motor command immediately; used by the motor task
 void applyMotorCommand(const MotorCommand& command) {
+  if (command.type != MotorCommandType::ReportStatus) {
+    cancelMotorVelocityControl();
+  }
+
   switch (command.type) {
     case MotorCommandType::MoveSteps:
       motor.moveToSteps(command.steps);
       break;
     case MotorCommandType::TargetMm:
       motor.moveToMm(command.value);
-      break;
-    case MotorCommandType::VelocityMmS:
-      motor.setVelocityMmS(command.value);
       break;
     case MotorCommandType::Stop:
       motor.stop();
@@ -329,6 +395,13 @@ void applyMotorCommand(const MotorCommand& command) {
         publishStatus("motor", "stall_home_rejected", "check_enabled_idle_diag_and_limits");
       }
       break;
+    case MotorCommandType::CalibrateAxis:
+      if (motor.startAxisCalibration(command.limit)) {
+        publishMotorState("axis_calibration_started");
+      } else {
+        publishStatus("motor", "axis_calibration_rejected", "check_enabled_idle_diag_and_limits");
+      }
+      break;
   }
 }
 
@@ -353,7 +426,7 @@ void handleCommand(JsonDocument& doc) {
       publishStatus("motor", "missing_field", "mm_s");
       return;
     }
-    queueMotorCommand({MotorCommandType::VelocityMmS, 0, doc["mm_s"].as<float>()});
+    queueMotorVelocityCommand(doc["mm_s"].as<float>());
   } else if (strcmp(cmd, "motor.stop") == 0) {
     queueMotorCommand({MotorCommandType::Stop, 0, 0.0f});
   } else if (strcmp(cmd, "motor.home_here") == 0) {
@@ -422,6 +495,14 @@ void handleCommand(JsonDocument& doc) {
     }
 
     queueMotorCommand({MotorCommandType::StallHome, 0, 0.0f, 0, maxTravelMm});
+  } else if (strcmp(cmd, "motor.calibrate_axis") == 0) {
+    const float maxTravelMm = doc["max_travel_mm"] | Config::kAxisCalibrationMaxTravelMm;
+    if (maxTravelMm <= 0.0f || maxTravelMm > Config::kAxisCalibrationMaxTravelMm) {
+      publishStatus("motor", "invalid_field", "axis_calibration_range");
+      return;
+    }
+
+    queueMotorCommand({MotorCommandType::CalibrateAxis, 0, 0.0f, 0, maxTravelMm});
   } else if (strcmp(cmd, "sensor.status") == 0) {
     publishSensorStatus();
   } else if (strcmp(cmd, "i2c.scan") == 0) {
@@ -596,8 +677,49 @@ void flowTask(void*) {
   }
 }
 
+void applyMotorVelocityCommand(const MotorVelocityCommand& command) {
+  if (motor.calibrationActive()) {
+    clearMotorVelocityCommandState();
+    publishStatus("motor", "velocity_rejected", "calibration_active");
+    return;
+  }
+
+  const uint32_t nowMs = millis();
+  if (nowMs - command.receivedMs > Config::kMotorVelocityCommandTimeoutMs) {
+    motor.stop();
+    clearMotorVelocityCommandState();
+    publishMotorState("velocity_command_expired");
+    return;
+  }
+
+  if (command.value == 0.0f) {
+    motor.stop();
+    clearMotorVelocityCommandState();
+    return;
+  }
+
+  motor.setVelocityMmS(command.value);
+  lastVelocityCommandMs = command.receivedMs;
+  velocityWatchdogArmed = true;
+}
+
+void checkMotorVelocityWatchdog() {
+  if (!velocityWatchdogArmed) {
+    return;
+  }
+
+  if (millis() - lastVelocityCommandMs < Config::kMotorVelocityCommandTimeoutMs) {
+    return;
+  }
+
+  motor.stop();
+  clearMotorVelocityCommandState();
+  publishMotorState("velocity_watchdog_stop");
+}
+
 void motorTask(void*) {
   MotorCommand command;
+  MotorVelocityCommand velocityCommand;
   uint8_t yieldCounter = 0;
 
   for (;;) {
@@ -607,6 +729,12 @@ void motorTask(void*) {
       }
     }
 
+    if (motorVelocityQueue != nullptr &&
+        xQueueReceive(motorVelocityQueue, &velocityCommand, 0) == pdTRUE) {
+      applyMotorVelocityCommand(velocityCommand);
+    }
+
+    checkMotorVelocityWatchdog();
     motor.service();
     publishMotorMotionEvent(motor.takeMotionEvent());
     delayMicroseconds(200);
@@ -626,11 +754,18 @@ void setup() {
   bool bootWarnings = false;
 
   motorCommandQueue = xQueueCreate(8, sizeof(MotorCommand));
+  motorVelocityQueue = xQueueCreate(1, sizeof(MotorVelocityCommand));
   i2cBusMutex = xSemaphoreCreateMutex();
   spiBusMutex = xSemaphoreCreateMutex();
   const bool motorQueueOk = motorCommandQueue != nullptr;
+  const bool motorVelocityQueueOk = motorVelocityQueue != nullptr;
   publishStatus("motor", motorQueueOk ? "queue_ok" : "queue_failed", nullptr, motorQueueOk ? nullptr : "warning");
-  bootWarnings = bootWarnings || !motorQueueOk;
+  publishStatus(
+      "motor",
+      motorVelocityQueueOk ? "velocity_mailbox_ok" : "velocity_mailbox_failed",
+      nullptr,
+      motorVelocityQueueOk ? nullptr : "warning");
+  bootWarnings = bootWarnings || !motorQueueOk || !motorVelocityQueueOk;
   bootWarnings = bootWarnings || i2cBusMutex == nullptr || spiBusMutex == nullptr;
 
   Wire.begin(Pins::kI2cSda, Pins::kI2cScl);

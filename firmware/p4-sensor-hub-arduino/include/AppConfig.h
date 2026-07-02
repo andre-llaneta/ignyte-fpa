@@ -62,13 +62,17 @@ constexpr float kStepsPerMm =
 
 constexpr float kMaxStageSpeedMmS = 8.0f;
 constexpr float kMaxStageAccelMmS2 = 20.0f;
+constexpr uint32_t kMotorVelocityCommandTimeoutMs = 2000;
+constexpr float kAxisCalibrationVelocityMmS = 8.0f;
+constexpr float kAxisCalibrationBackoffMm = kLeadScrewMmPerRev;
+constexpr float kAxisCalibrationMaxTravelMm = 250.0f;
 constexpr float kMaxStallTestTravelMm = 10.0f;
-constexpr uint8_t kStallGuardThreshold = 55;
+constexpr uint8_t kStallGuardThreshold = 65;
 constexpr uint32_t kStallGuardCoolThreshold = 1500;
-constexpr float kStallHomeVelocityMmS = -2.0f;
+constexpr float kStallHomeVelocityMmS = -4.0f;
 constexpr float kStallHomeBackoffMm = kLeadScrewMmPerRev;
 constexpr float kMaxStallHomeTravelMm = 100.0f;
-constexpr bool kMotorDirectionInverted = false;
+constexpr bool kMotorDirectionInverted = true;
 constexpr bool kMotorEnableActiveLow = true;
 constexpr bool kEndstopActiveLow = true;
 }  // namespace Config

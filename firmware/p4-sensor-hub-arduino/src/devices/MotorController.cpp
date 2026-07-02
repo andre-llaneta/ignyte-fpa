@@ -38,6 +38,7 @@ void MotorController::begin() {
 void MotorController::configureDriver() {
   stopImmediately();
   cancelStallMotion();
+  cancelAxisCalibration();
 
   lockDriver();
   driver_.begin();
@@ -56,6 +57,14 @@ void MotorController::configureDriver() {
 
 void MotorController::service() {
   if (!enabled_) {
+    return;
+  }
+
+  if (serviceAxisCalibration()) {
+    return;
+  }
+
+  if (enforceSoftwareLimits()) {
     return;
   }
 
@@ -96,6 +105,10 @@ void MotorController::service() {
     stepper_.run();
   }
 
+  if (enforceSoftwareLimits()) {
+    return;
+  }
+
   if ((stallMotionMode_ == StallMotionMode::Test ||
        stallMotionMode_ == StallMotionMode::HomeSeek) &&
       labs(stepper_.currentPosition() - stallTestStartSteps_) >= stallTestMaxTravelSteps_) {
@@ -121,17 +134,16 @@ void MotorController::service() {
 
 void MotorController::stop() {
   cancelStallMotion();
+  cancelAxisCalibration();
   velocityMode_ = false;
   stepper_.stop();
 }
 
 void MotorController::moveToSteps(long steps) {
   cancelStallMotion();
+  cancelAxisCalibration();
   velocityMode_ = false;
-  if (steps < 0) {
-    steps = 0;
-  }
-  stepper_.moveTo(steps);
+  stepper_.moveTo(clampToSoftwareLimits(steps));
 }
 
 void MotorController::moveToMm(float mm) {
@@ -140,12 +152,24 @@ void MotorController::moveToMm(float mm) {
 
 void MotorController::setVelocityMmS(float velocityMmS) {
   cancelStallMotion();
+  cancelAxisCalibration();
+  if (limitsValid_) {
+    const long position = stepper_.currentPosition();
+    if ((velocityMmS < 0.0f && position <= minLimitSteps_) ||
+        (velocityMmS > 0.0f && position >= maxLimitSteps_)) {
+      stopImmediately();
+      motionEvent_ = MotorMotionEvent::SoftwareLimitHit;
+      return;
+    }
+  }
   velocityMode_ = true;
   stepper_.setSpeed(velocityMmS * Config::kStepsPerMm);
 }
 
 void MotorController::homeHere() {
   cancelStallMotion();
+  cancelAxisCalibration();
+  limitsValid_ = false;
   stepper_.setCurrentPosition(0);
 }
 
@@ -165,6 +189,22 @@ bool MotorController::velocityMode() const {
   return velocityMode_;
 }
 
+bool MotorController::calibrationActive() const {
+  return calibrationMode_ != AxisCalibrationMode::None;
+}
+
+bool MotorController::limitsValid() const {
+  return limitsValid_;
+}
+
+float MotorController::minLimitMm() const {
+  return static_cast<float>(minLimitSteps_) / Config::kStepsPerMm;
+}
+
+float MotorController::maxLimitMm() const {
+  return static_cast<float>(maxLimitSteps_) / Config::kStepsPerMm;
+}
+
 bool MotorController::endstopActive() const {
   const int value = digitalRead(Pins::kMotorEndstop);
   return Config::kEndstopActiveLow ? value == LOW : value == HIGH;
@@ -182,7 +222,7 @@ void MotorController::setEnabled(bool enabled) {
 
 bool MotorController::configureStallGuard(uint8_t threshold, uint32_t coolThreshold) {
   if (coolThreshold > kMaxTcoolthrs || stallMotionMode_ != StallMotionMode::None ||
-      velocityMode_ ||
+      calibrationActive() || velocityMode_ ||
       stepper_.distanceToGo() != 0) {
     return false;
   }
@@ -197,7 +237,7 @@ bool MotorController::configureStallGuard(uint8_t threshold, uint32_t coolThresh
 bool MotorController::startStallTest(float velocityMmS, float maxTravelMm) {
   if (!enabled_ || velocityMmS == 0.0f || maxTravelMm <= 0.0f ||
       maxTravelMm > Config::kMaxStallTestTravelMm || velocityMode_ ||
-      stepper_.distanceToGo() != 0 ||
+      calibrationActive() || stepper_.distanceToGo() != 0 ||
       fabsf(velocityMmS) > Config::kMaxStageSpeedMmS ||
       digitalRead(Pins::kMotorDiag) == HIGH) {
     return false;
@@ -221,7 +261,7 @@ bool MotorController::startStallTest(float velocityMmS, float maxTravelMm) {
 
 bool MotorController::startStallHome(float maxTravelMm) {
   if (!enabled_ || maxTravelMm <= 0.0f || maxTravelMm > Config::kMaxStallHomeTravelMm ||
-      velocityMode_ || stepper_.distanceToGo() != 0 ||
+      calibrationActive() || velocityMode_ || stepper_.distanceToGo() != 0 ||
       digitalRead(Pins::kMotorDiag) == HIGH) {
     return false;
   }
@@ -242,6 +282,36 @@ bool MotorController::startStallHome(float maxTravelMm) {
   stallMotionMode_ = StallMotionMode::HomeSeek;
   velocityMode_ = true;
   stepper_.setSpeed(Config::kStallHomeVelocityMmS * Config::kStepsPerMm);
+  armStallGuard();
+  return true;
+}
+
+bool MotorController::startAxisCalibration(float maxTravelMm) {
+  if (!enabled_ || maxTravelMm <= 0.0f ||
+      maxTravelMm > Config::kAxisCalibrationMaxTravelMm || velocityMode_ ||
+      stallMotionMode_ != StallMotionMode::None || calibrationActive() ||
+      stepper_.distanceToGo() != 0 || fabsf(Config::kAxisCalibrationVelocityMmS) >
+                                       Config::kMaxStageSpeedMmS ||
+      digitalRead(Pins::kMotorDiag) == HIGH) {
+    return false;
+  }
+
+  const long maxTravelSteps = static_cast<long>(maxTravelMm * Config::kStepsPerMm);
+  const long backoffSteps =
+      static_cast<long>(Config::kAxisCalibrationBackoffMm * Config::kStepsPerMm);
+  if (maxTravelSteps <= 0 || backoffSteps <= 0) {
+    return false;
+  }
+
+  stopImmediately();
+  limitsValid_ = false;
+  motionEvent_ = MotorMotionEvent::None;
+  calibrationStartSteps_ = stepper_.currentPosition();
+  calibrationMaxTravelSteps_ = maxTravelSteps;
+  calibrationBackoffSteps_ = backoffSteps;
+  calibrationMode_ = AxisCalibrationMode::SeekMin;
+  velocityMode_ = true;
+  stepper_.setSpeed(-fabsf(Config::kAxisCalibrationVelocityMmS) * Config::kStepsPerMm);
   armStallGuard();
   return true;
 }
@@ -332,6 +402,149 @@ void MotorController::startHomeBackoff(bool endstopTriggered) {
   stallMotionMode_ = StallMotionMode::HomeBackoff;
   velocityMode_ = true;
   stepper_.setSpeed(fabsf(Config::kStallHomeVelocityMmS) * Config::kStepsPerMm);
+}
+
+void MotorController::cancelAxisCalibration() {
+  calibrationMode_ = AxisCalibrationMode::None;
+  disarmStallGuard();
+}
+
+bool MotorController::serviceAxisCalibration() {
+  if (!calibrationActive()) {
+    return false;
+  }
+
+  if (calibrationMode_ == AxisCalibrationMode::SeekMin &&
+      (endstopActive() || diagInterruptPending_)) {
+    startCalibrationMinBackoff();
+    return true;
+  }
+
+  if (calibrationMode_ == AxisCalibrationMode::SeekMax &&
+      (endstopActive() || diagInterruptPending_)) {
+    startCalibrationMaxBackoff();
+    return true;
+  }
+
+  if (velocityMode_) {
+    stepper_.runSpeed();
+  } else {
+    stepper_.run();
+  }
+
+  if ((calibrationMode_ == AxisCalibrationMode::SeekMin ||
+       calibrationMode_ == AxisCalibrationMode::SeekMax) &&
+      labs(stepper_.currentPosition() - calibrationStartSteps_) >=
+          calibrationMaxTravelSteps_) {
+    stopImmediately();
+    cancelAxisCalibration();
+    motionEvent_ = MotorMotionEvent::AxisCalibrationTravelLimit;
+    return true;
+  }
+
+  if (calibrationMode_ == AxisCalibrationMode::BackoffMin &&
+      stepper_.distanceToGo() == 0) {
+    stopImmediately();
+    stepper_.setCurrentPosition(0);
+    minLimitSteps_ = 0;
+    calibrationStartSteps_ = 0;
+    calibrationMode_ = AxisCalibrationMode::SeekMax;
+    velocityMode_ = true;
+    stepper_.setSpeed(fabsf(Config::kAxisCalibrationVelocityMmS) * Config::kStepsPerMm);
+    motionEvent_ = MotorMotionEvent::AxisCalibrationMinSet;
+    armStallGuard();
+    return true;
+  }
+
+  if (calibrationMode_ == AxisCalibrationMode::BackoffMax &&
+      stepper_.distanceToGo() == 0) {
+    stopImmediately();
+    maxLimitSteps_ = stepper_.currentPosition();
+    limitsValid_ = maxLimitSteps_ > minLimitSteps_;
+    if (!limitsValid_) {
+      cancelAxisCalibration();
+      motionEvent_ = MotorMotionEvent::AxisCalibrationTravelLimit;
+      return true;
+    }
+
+    calibrationMode_ = AxisCalibrationMode::MoveCenter;
+    velocityMode_ = false;
+    stepper_.moveTo((minLimitSteps_ + maxLimitSteps_) / 2);
+    return true;
+  }
+
+  if (calibrationMode_ == AxisCalibrationMode::MoveCenter &&
+      stepper_.distanceToGo() == 0) {
+    stopImmediately();
+    calibrationMode_ = AxisCalibrationMode::None;
+    motionEvent_ = MotorMotionEvent::AxisCalibrationComplete;
+    return true;
+  }
+
+  return true;
+}
+
+void MotorController::startCalibrationMinBackoff() {
+  stopImmediately();
+  disarmStallGuard();
+  velocityMode_ = false;
+  calibrationMode_ = AxisCalibrationMode::BackoffMin;
+  stepper_.move(calibrationBackoffSteps_);
+}
+
+void MotorController::startCalibrationMaxBackoff() {
+  stopImmediately();
+  disarmStallGuard();
+  velocityMode_ = false;
+  calibrationMode_ = AxisCalibrationMode::BackoffMax;
+  stepper_.move(-calibrationBackoffSteps_);
+}
+
+bool MotorController::enforceSoftwareLimits() {
+  if (!limitsValid_ || calibrationActive()) {
+    return false;
+  }
+
+  const long position = stepper_.currentPosition();
+  const bool movingTowardMin =
+      stepper_.speed() < 0.0f || (!velocityMode_ && stepper_.distanceToGo() < 0);
+  const bool movingTowardMax =
+      stepper_.speed() > 0.0f || (!velocityMode_ && stepper_.distanceToGo() > 0);
+
+  if (position <= minLimitSteps_ && movingTowardMin) {
+    stopImmediately();
+    stepper_.setCurrentPosition(minLimitSteps_);
+    motionEvent_ = MotorMotionEvent::SoftwareLimitHit;
+    return true;
+  }
+
+  if (position >= maxLimitSteps_ && movingTowardMax) {
+    stopImmediately();
+    stepper_.setCurrentPosition(maxLimitSteps_);
+    motionEvent_ = MotorMotionEvent::SoftwareLimitHit;
+    return true;
+  }
+
+  return false;
+}
+
+long MotorController::clampToSoftwareLimits(long steps) {
+  if (limitsValid_) {
+    if (steps < minLimitSteps_) {
+      motionEvent_ = MotorMotionEvent::SoftwareLimitHit;
+      return minLimitSteps_;
+    }
+    if (steps > maxLimitSteps_) {
+      motionEvent_ = MotorMotionEvent::SoftwareLimitHit;
+      return maxLimitSteps_;
+    }
+    return steps;
+  }
+
+  if (steps < 0) {
+    return 0;
+  }
+  return steps;
 }
 
 void MotorController::stopImmediately() {

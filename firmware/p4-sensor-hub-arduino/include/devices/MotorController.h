@@ -44,6 +44,10 @@ enum class MotorMotionEvent {
   StallHomeComplete,
   StallHomeCompleteEndstop,
   StallHomeTravelLimit,
+  AxisCalibrationMinSet,
+  AxisCalibrationComplete,
+  AxisCalibrationTravelLimit,
+  SoftwareLimitHit,
 };
 
 class MotorController {
@@ -62,11 +66,16 @@ class MotorController {
   bool endstopActive() const;
   bool enabled() const;
   bool velocityMode() const;
+  bool calibrationActive() const;
+  bool limitsValid() const;
+  float minLimitMm() const;
+  float maxLimitMm() const;
   void setEnabled(bool enabled);
   void configureDriver();
   bool configureStallGuard(uint8_t threshold, uint32_t coolThreshold);
   bool startStallTest(float velocityMmS, float maxTravelMm);
   bool startStallHome(float maxTravelMm);
+  bool startAxisCalibration(float maxTravelMm);
   MotorMotionEvent takeMotionEvent();
   TmcDriverDiagnostics readDriverDiagnostics();
   TmcStallDiagnostics readStallDiagnostics();
@@ -78,6 +87,12 @@ class MotorController {
   void cancelStallMotion();
   void startHomeBackoff(bool endstopTriggered);
   bool stallHomeActive() const;
+  void cancelAxisCalibration();
+  bool serviceAxisCalibration();
+  void startCalibrationMinBackoff();
+  void startCalibrationMaxBackoff();
+  bool enforceSoftwareLimits();
+  long clampToSoftwareLimits(long steps);
   void stopImmediately();
   void lockDriver();
   void unlockDriver();
@@ -92,6 +107,15 @@ class MotorController {
     HomeBackoff,
   };
 
+  enum class AxisCalibrationMode {
+    None,
+    SeekMin,
+    BackoffMin,
+    SeekMax,
+    BackoffMax,
+    MoveCenter,
+  };
+
   HardwareSerial& serial_;
   TMC2209Stepper driver_;
   AccelStepper stepper_;
@@ -99,9 +123,16 @@ class MotorController {
   bool velocityMode_ = false;
   bool enabled_ = false;
   StallMotionMode stallMotionMode_ = StallMotionMode::None;
+  AxisCalibrationMode calibrationMode_ = AxisCalibrationMode::None;
   long stallTestStartSteps_ = 0;
   long stallTestMaxTravelSteps_ = 0;
   long stallHomeBackoffSteps_ = 0;
   bool stallHomeEndstopTriggered_ = false;
+  long calibrationStartSteps_ = 0;
+  long calibrationMaxTravelSteps_ = 0;
+  long calibrationBackoffSteps_ = 0;
+  bool limitsValid_ = false;
+  long minLimitSteps_ = 0;
+  long maxLimitSteps_ = 0;
   MotorMotionEvent motionEvent_ = MotorMotionEvent::None;
 };
