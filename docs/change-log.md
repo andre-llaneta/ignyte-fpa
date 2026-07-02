@@ -14,6 +14,65 @@ Why:
 Verification:
 ```
 
+## 2026-07-02 - Axis Calibration DIAG Re-Arm Guard
+
+What changed:
+
+- Added a `2000 ms` DIAG ignore window at the start of axis calibration's positive/max seek. This prevents a stale or re-latched StallGuard DIAG event from immediately ending the max seek right after the min-side detection and backoff.
+
+Why:
+
+Re-arming DIAG immediately after the min backoff could preserve or re-latch a transient DIAG event, causing the max seek to stop as soon as it started.
+
+Verification:
+
+Hardware test confirmed axis calibration completed correctly after adding the max-seek DIAG ignore window.
+
+## 2026-07-02 - Motor Driver Boot Power Requirement
+
+What changed:
+
+- Documented that the motor driver must be powered when firmware boots/configures the TMC2209.
+- Added `mstep_reg_select(true)` to make UART-selected microsteps explicit before writing the configured microstep value.
+
+Why:
+
+If the driver is not powered during initial configuration, it misses the UART microstep command and can remain at its default/readback value of `8` microsteps even though firmware is calculating motion for `4`. That made firmware use `400 steps/mm` while the driver behaved like `800 steps/mm`, so a `100 mm` target moved about `50 mm`.
+
+Verification:
+
+`motor.driver_status` exposed the microstep mismatch by reporting `8` when the driver missed boot-time configuration.
+
+## 2026-07-02 - High-Speed Motor Step Rate Tuning
+
+What changed:
+
+- Reduced TMC2209 microstepping from `16` to `4` to lower the required step-pulse rate and improve behavior at higher stage speeds.
+- Tested ramped velocity control as an alternative to instant `runSpeed()` velocity changes, but did not keep it because it produced inconsistent speed behavior during hardware testing.
+
+Why:
+
+At `16` microsteps and a `2 mm/rev` lead screw, `20 mm/s` requires about `32000 steps/s`. Reducing to `4` microsteps lowers that to about `8000 steps/s`, which is more realistic for the current AccelStepper polling approach.
+
+Verification:
+
+Hardware speed testing showed that lower microstepping behaved better at higher requested speeds than the ramped velocity experiment.
+
+## 2026-07-02 - Motor Velocity Watchdog Stop Behavior Fixed
+
+What changed:
+
+- Changed the motor stop path to clear AccelStepper's current target/speed state immediately instead of asking AccelStepper to plan a decelerated stop after velocity-mode motion.
+- Confirmed this fixed the observed watchdog behavior where the stage moved, slowed sharply after timeout, sped up again briefly, then finally stopped.
+
+Why:
+
+Velocity mode uses `setSpeed()` with `runSpeed()`, while AccelStepper's normal `stop()` path is designed around acceleration-planned `run()` motion. Switching from velocity mode into `stop()` could leave the planner in a state that caused a decelerate/re-accelerate/stop sequence after the velocity watchdog expired.
+
+Verification:
+
+Hardware test confirmed that the watchdog stop no longer produces the slow-then-speed-up-then-stop behavior.
+
 ## 2026-07-02 - Motor Calibration And OpenCV Serial Docs Synced
 
 What changed:

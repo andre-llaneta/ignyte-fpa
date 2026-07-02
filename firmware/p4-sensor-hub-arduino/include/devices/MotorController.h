@@ -87,8 +87,10 @@ class MotorController {
   void cancelStallMotion();
   void startHomeBackoff(bool endstopTriggered);
   bool stallHomeActive() const;
+  void setStallGuardThreshold(uint8_t threshold);
   void cancelAxisCalibration();
   bool serviceAxisCalibration();
+  bool seekMaxDiagPending();
   void startCalibrationMinBackoff();
   void startCalibrationMaxBackoff();
   bool enforceSoftwareLimits();
@@ -131,6 +133,7 @@ class MotorController {
   long calibrationStartSteps_ = 0;
   long calibrationMaxTravelSteps_ = 0;
   long calibrationBackoffSteps_ = 0;
+  uint32_t calibrationSeekMaxDiagIgnoreUntilMs_ = 0;
   bool limitsValid_ = false;
   long minLimitSteps_ = 0;
   long maxLimitSteps_ = 0;

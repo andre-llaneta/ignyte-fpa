@@ -309,16 +309,16 @@ Current mechanical assumptions:
 | --- | ---: |
 | Motor full steps/rev | 200 |
 | Lead screw | 2 mm/rev |
-| Microsteps | 16 |
-| Steps/mm | 1600 |
-| Max speed | 8 mm/s |
+| Microsteps | 4 |
+| Steps/mm | 400 |
+| Max speed | 20 mm/s |
 | Max acceleration | 20 mm/s^2 |
-| StallGuard threshold | SGTHRS 65 |
+| StallGuard threshold | SGTHRS 158 |
 | StallGuard cool threshold | TCOOLTHRS 1500 |
-| Stall homing speed | -4 mm/s |
+| Stall homing speed | -20 mm/s |
 | Stall homing backoff | 2 mm |
-| Axis calibration speed | 8 mm/s |
-| Axis calibration max travel | 250 mm |
+| Axis calibration speed | 20 mm/s |
+| Axis calibration max travel | 300 mm |
 | Motor current | 600 mA RMS |
 | Motor direction inverted | true |
 
@@ -329,7 +329,9 @@ MS1/MS2 are also connected to an MCP23017 on the I2C bus. Current mapping:
 | MS2 | GPA0 / A0 |
 | MS1 | GPA1 / A1 |
 
-The MCP23017 address is currently `0x20`, configurable by jumper pads and stored in `Addresses::kMcp23017`. At boot, firmware sets MS1/MS2 from `Config::kMicrosteps`; for the current `16` microstep setting, both MS1 and MS2 are driven high. The firmware also configures microsteps over TMC2209 UART so the physical pins and UART setting should agree.
+The MCP23017 address is currently `0x20`, configurable by jumper pads and stored in `Addresses::kMcp23017`. At boot, firmware sets MS1/MS2 from `Config::kMicrosteps`; for the current `4` microstep setting, MS1 is driven low and MS2 is driven high. The firmware also configures microsteps over TMC2209 UART so the physical pins and UART setting should agree.
+
+The motor driver and motor power supply must be on before the ESP32-P4 boots or before `motor.driver_configure` is run. If the TMC2209 is unpowered during initial firmware configuration, it misses the UART microstep command and can stay at its default/readback value of `8` microsteps. That makes firmware calculate motion using `400 steps/mm` while the real driver behaves like `800 steps/mm`, so a `100 mm` target moves about `50 mm`. After boot, use `motor.driver_status` and confirm the reported `microsteps` matches `Config::kMicrosteps`.
 
 The expected stage is a vertical FUYU-style NEMA14 screw stage with a 2 mm lead. The endstop is currently assumed to be a bottom/home switch, so home is position `0 mm` and upward travel is positive.
 
@@ -361,7 +363,7 @@ Most motor commands are placed into a FreeRTOS queue and applied by `motorTask`.
 
 `motor.stall_home` moves toward home using the configured negative homing velocity, stops on StallGuard DIAG or the physical endstop, backs off one 2 mm screw revolution, and sets the backed-off position to zero. If neither source is reached before the travel bound, it reports `stall_home_not_detected` and does not reset position.
 
-`motor.stall_status` and `motor.driver_status` perform TMC UART reads outside the motor pulse-generation task so repeated diagnostics do not block step servicing. A healthy TMC UART should report `connection_ok:true`; if it reports false, StallGuard configuration/readback should not be trusted.
+`motor.stall_status` and `motor.driver_status` perform TMC UART reads outside the motor pulse-generation task so repeated diagnostics do not block step servicing. A healthy TMC UART should report `connection_ok:true`; if it reports false, StallGuard configuration/readback should not be trusted. For motion scale validation, `motor.driver_status` should report the same `microsteps` value as `Config::kMicrosteps`.
 
 Important safety assumptions:
 
@@ -478,6 +480,7 @@ The code builds successfully, but these hardware/runtime assumptions still need 
 - `Serial` is USB CDC and does not conflict with `HardwareSerial(0)` used for Flow 2.
 - `HardwareSerial(0)` can safely be used for GPIO37/GPIO38 on this ESP32-P4 board.
 - TMC2209 UART works using RX GPIO32 and TX GPIO23.
+- TMC2209 driver and motor supply are powered before boot/configuration so UART setup commands are actually received.
 - TMC2209 driver address is `0b00`.
 - TMC2209 sense resistor is `0.05 ohm`.
 - 600 mA RMS current is appropriate for the selected NEMA14 motor.
@@ -499,16 +502,17 @@ Recommended order:
 4. Run an I2C scan and confirm SHT45/BME688/SEN0496/MCP23017 addresses.
 5. Bring up one MAX31856, then all four.
 6. For a future D6F-capable hardware revision, check D6F raw ADC and voltage against a multimeter.
-7. Test TMC2209 UART communication before motor movement.
-8. Test motor enable and one-step/small-step movement at low current.
-9. Verify direction polarity.
-10. Verify endstop polarity and StallGuard homing behavior.
-11. Test one Bronkhorst channel with read-measure only.
-12. Test Bronkhorst setpoint write at low/safe flow.
-13. Add a laptop logger that records JSONL with laptop receive timestamps.
-14. Add command IDs and stricter error reporting.
-15. Run `motor.calibrate_axis` and validate calibrated software limits before closed-loop camera tracking.
-16. Add safety limits for flow range and a true emergency-stop path.
+7. Power the motor driver/motor supply before boot, then test TMC2209 UART communication before motor movement.
+8. Run `motor.driver_status` and confirm `connection_ok:true` and `microsteps` matches `Config::kMicrosteps`.
+9. Test motor enable and one-step/small-step movement at low current.
+10. Verify direction polarity.
+11. Verify endstop polarity and StallGuard homing behavior.
+12. Test one Bronkhorst channel with read-measure only.
+13. Test Bronkhorst setpoint write at low/safe flow.
+14. Add a laptop logger that records JSONL with laptop receive timestamps.
+15. Add command IDs and stricter error reporting.
+16. Run `motor.calibrate_axis` and validate calibrated software limits before closed-loop camera tracking.
+17. Add safety limits for flow range and a true emergency-stop path.
 
 ## Current Build Status
 

@@ -43,6 +43,7 @@ void MotorController::configureDriver() {
   lockDriver();
   driver_.begin();
   driver_.pdn_disable(true);
+  driver_.mstep_reg_select(true);
   driver_.I_scale_analog(false);
   driver_.rms_current(kMotorCurrentMa);
   driver_.microsteps(Config::kMicrosteps);
@@ -136,7 +137,7 @@ void MotorController::stop() {
   cancelStallMotion();
   cancelAxisCalibration();
   velocityMode_ = false;
-  stepper_.stop();
+  stopImmediately();
 }
 
 void MotorController::moveToSteps(long steps) {
@@ -309,8 +310,10 @@ bool MotorController::startAxisCalibration(float maxTravelMm) {
   calibrationStartSteps_ = stepper_.currentPosition();
   calibrationMaxTravelSteps_ = maxTravelSteps;
   calibrationBackoffSteps_ = backoffSteps;
+  calibrationSeekMaxDiagIgnoreUntilMs_ = 0;
   calibrationMode_ = AxisCalibrationMode::SeekMin;
   velocityMode_ = true;
+  setStallGuardThreshold(Config::kAxisCalibrationSeekMinSgthrs);
   stepper_.setSpeed(-fabsf(Config::kAxisCalibrationVelocityMmS) * Config::kStepsPerMm);
   armStallGuard();
   return true;
@@ -396,6 +399,12 @@ void MotorController::cancelStallMotion() {
   disarmStallGuard();
 }
 
+void MotorController::setStallGuardThreshold(uint8_t threshold) {
+  lockDriver();
+  driver_.SGTHRS(threshold);
+  unlockDriver();
+}
+
 void MotorController::startHomeBackoff(bool endstopTriggered) {
   stallHomeEndstopTriggered_ = endstopTriggered;
   stallTestStartSteps_ = stepper_.currentPosition();
@@ -406,6 +415,7 @@ void MotorController::startHomeBackoff(bool endstopTriggered) {
 
 void MotorController::cancelAxisCalibration() {
   calibrationMode_ = AxisCalibrationMode::None;
+  calibrationSeekMaxDiagIgnoreUntilMs_ = 0;
   disarmStallGuard();
 }
 
@@ -421,7 +431,7 @@ bool MotorController::serviceAxisCalibration() {
   }
 
   if (calibrationMode_ == AxisCalibrationMode::SeekMax &&
-      (endstopActive() || diagInterruptPending_)) {
+      (endstopActive() || seekMaxDiagPending())) {
     startCalibrationMaxBackoff();
     return true;
   }
@@ -450,7 +460,10 @@ bool MotorController::serviceAxisCalibration() {
     calibrationStartSteps_ = 0;
     calibrationMode_ = AxisCalibrationMode::SeekMax;
     velocityMode_ = true;
+    setStallGuardThreshold(Config::kAxisCalibrationSeekMaxSgthrs);
     stepper_.setSpeed(fabsf(Config::kAxisCalibrationVelocityMmS) * Config::kStepsPerMm);
+    calibrationSeekMaxDiagIgnoreUntilMs_ =
+        millis() + Config::kAxisCalibrationSeekMaxDiagIgnoreMs;
     motionEvent_ = MotorMotionEvent::AxisCalibrationMinSet;
     armStallGuard();
     return true;
@@ -482,6 +495,17 @@ bool MotorController::serviceAxisCalibration() {
   }
 
   return true;
+}
+
+bool MotorController::seekMaxDiagPending() {
+  if (static_cast<int32_t>(millis() - calibrationSeekMaxDiagIgnoreUntilMs_) < 0) {
+    noInterrupts();
+    diagInterruptPending_ = false;
+    interrupts();
+    return false;
+  }
+
+  return diagInterruptPending_;
 }
 
 void MotorController::startCalibrationMinBackoff() {

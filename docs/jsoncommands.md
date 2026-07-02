@@ -236,7 +236,7 @@ Output:
   "version": 33,
   "drv_status": 0,
   "rms_current_ma": 600,
-  "microsteps": 16
+  "microsteps": 4
 }
 ```
 
@@ -248,10 +248,10 @@ Stops motion, cancels active StallGuard motion, and reapplies the default TMC220
 
 Current defaults include:
 
-- `SGTHRS=65`
+- `SGTHRS=158`
 - `TCOOLTHRS=1500`
 - `600 mA RMS`
-- `16` microsteps
+- `4` microsteps
 - StealthChop enabled
 
 Input:
@@ -274,13 +274,13 @@ Configures the TMC2209 StallGuard threshold and lower velocity-window threshold.
 
 Input fields:
 
-- `sgthrs`: integer `0..255`. Higher values are more sensitive and detect earlier.
+- `sgthrs`: integer `0..255`. Higher values are more sensitive and detect earlier. Current firmware default is `158`.
 - `tcoolthrs`: integer `0..1048575`.
 
 Input:
 
 ```json
-{"cmd":"motor.stall_config","sgthrs":65,"tcoolthrs":1500}
+{"cmd":"motor.stall_config","sgthrs":158,"tcoolthrs":1500}
 ```
 
 Successful outputs:
@@ -346,8 +346,8 @@ Starts a bounded constant-velocity StallGuard test and arms the DIAG GPIO 50 int
 
 Input fields:
 
-- `mm_s`: nonzero signed velocity, limited to `-8..8`.
-- `max_travel_mm`: positive travel limit, maximum `10`.
+- `mm_s`: nonzero signed velocity, limited to `-20..20`.
+- `max_travel_mm`: positive travel limit, maximum `200`.
 
 Input:
 
@@ -392,7 +392,7 @@ Runs bounded sensorless homing. The firmware seeks at the configured homing velo
 
 Current homing settings:
 
-- Seek velocity: `-4.0 mm/s`
+- Seek velocity: `-20.0 mm/s`
 - Backoff: `2.0 mm`
 - Maximum allowed command travel: `100 mm`
 
@@ -453,18 +453,19 @@ Calibration sequence:
 
 Current calibration settings:
 
-- Seek velocity: `8.0 mm/s`
+- Seek velocity: `20.0 mm/s`
 - Backoff: `2.0 mm`
-- Maximum seek travel per direction: `250 mm`
+- Maximum seek travel per direction: `300 mm`
+- The positive/max seek ignores DIAG for the first `2000 ms` after switching from the min-side backoff so stale or re-latched DIAG events do not immediately end calibration.
 
 Input fields:
 
-- `max_travel_mm`: optional positive safety cap for each seek direction, maximum `250`. If omitted, firmware uses `250`.
+- `max_travel_mm`: optional positive safety cap for each seek direction, maximum `300`. If omitted, firmware uses `300`.
 
 Input:
 
 ```json
-{"cmd":"motor.calibrate_axis","max_travel_mm":250.0}
+{"cmd":"motor.calibrate_axis","max_travel_mm":300.0}
 ```
 
 Start outputs:

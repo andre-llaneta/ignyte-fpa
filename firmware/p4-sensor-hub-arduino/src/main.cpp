@@ -737,7 +737,7 @@ void motorTask(void*) {
     checkMotorVelocityWatchdog();
     motor.service();
     publishMotorMotionEvent(motor.takeMotionEvent());
-    delayMicroseconds(200);
+    delayMicroseconds(20);
     if (++yieldCounter >= 10) {
       yieldCounter = 0;
       vTaskDelay(pdMS_TO_TICKS(1));
