@@ -60,6 +60,10 @@ Expected response:
   "enabled": false,
   "endstop_active": false,
   "velocity_mode": false,
+  "calibration_active": false,
+  "limits_valid": false,
+  "min_limit_mm": 0,
+  "max_limit_mm": 0,
   "position_steps": 0,
   "position_mm": 0
 }
@@ -77,7 +81,7 @@ Expected responses:
 
 ```json
 {"type":"status","t_us":123456789,"component":"motor","status":"command_queued"}
-{"type":"status","t_us":123456999,"component":"motor","status":"enabled","enabled":true,"endstop_active":false,"velocity_mode":false,"position_steps":0,"position_mm":0}
+{"type":"status","t_us":123456999,"component":"motor","status":"enabled","enabled":true,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":0,"position_mm":0}
 ```
 
 #### `motor.disable`
@@ -120,15 +124,25 @@ This is not a relative move. Sending the same target twice will not move the sta
 
 Runs the motor at a signed velocity in millimeters per second.
 
+Velocity commands use a one-slot latest-wins mailbox instead of the normal FIFO motor command queue. If multiple camera-control velocity updates arrive faster than `motorTask` services them, only the newest velocity is kept.
+
+If no new nonzero velocity command arrives within `2000 ms`, the firmware stops the motor and emits `velocity_watchdog_stop`.
+
 ```json
 {"cmd":"motor.velocity_mm_s","mm_s":0.5}
 ```
 
 Fields:
 
-- `mm_s`: signed numeric velocity.
+- `mm_s`: signed numeric velocity. `0` stops velocity motion immediately and disarms the velocity watchdog.
 
 Positive and negative signs select opposite directions. If the endstop is active while moving negative, the firmware stops motion, exits velocity mode, and sets the current position to `0`.
+
+Velocity commands are rejected while axis calibration is active:
+
+```json
+{"type":"status","t_us":123456789,"component":"motor","status":"velocity_rejected","detail":"calibration_active"}
+```
 
 #### `motor.stop`
 
@@ -160,7 +174,7 @@ Reads the TMC2209 UART connection and driver configuration.
 
 #### `motor.driver_configure`
 
-Stops motion and reapplies the default TMC2209 configuration. This restores `SGTHRS=35` and `TCOOLTHRS=1500`, disables any active StallGuard test or homing sequence, and leaves the motor driver enable state unchanged.
+Stops motion and reapplies the default TMC2209 configuration. This restores `SGTHRS=65` and `TCOOLTHRS=1500`, disables any active StallGuard test, homing sequence, or axis calibration, and leaves the motor driver enable state unchanged.
 
 ```json
 {"cmd":"motor.driver_configure"}
@@ -168,7 +182,7 @@ Stops motion and reapplies the default TMC2209 configuration. This restores `SGT
 
 #### `motor.stall_config`
 
-Configures the TMC2209 StallGuard4 threshold and lower velocity-window register. The motor must be stopped and no StallGuard test may be active.
+Configures the TMC2209 StallGuard4 threshold and lower velocity-window register. The motor must be stopped and no StallGuard test, StallGuard homing sequence, axis calibration, velocity motion, or target move may be active.
 
 ```json
 {"cmd":"motor.stall_config","sgthrs":128,"tcoolthrs":1048575}
@@ -239,7 +253,7 @@ Fields:
 
 The motor must already be enabled and idle, and DIAG must be low. The sequence then:
 
-1. Moves toward home at `-1 mm/s` with StallGuard armed.
+1. Moves toward home at `-4 mm/s` with StallGuard armed.
 2. Stops immediately on a DIAG pulse or physical endstop.
 3. Disarms StallGuard and moves `+2 mm`, equal to one configured lead-screw revolution.
 4. Sets the backed-off position to logical `0 mm`.
@@ -252,6 +266,38 @@ Expected responses are:
 ```
 
 If the physical endstop is reached first, completion uses `"home_source":"endstop"`. If neither source is reached before the travel bound, the firmware stops and emits `stall_home_not_detected`; it does not set the position to zero.
+
+#### `motor.calibrate_axis`
+
+Runs full axis calibration and enables calibrated software limits.
+
+```json
+{"cmd":"motor.calibrate_axis"}
+```
+
+Optional field:
+
+- `max_travel_mm`: positive safety cap for each seek direction, no greater than `250 mm`. If omitted, firmware uses `250 mm`.
+
+The motor must already be enabled and idle, and DIAG must be low. The sequence:
+
+1. Seeks negative at `8 mm/s` until StallGuard DIAG or the physical endstop triggers.
+2. Backs off positive by `2 mm`.
+3. Sets that backed-off point to logical `0 mm`.
+4. Seeks positive at `8 mm/s` until StallGuard DIAG or the physical endstop triggers.
+5. Backs off negative by `2 mm`.
+6. Stores that backed-off point as `max_limit_mm`.
+7. Moves to the center of the calibrated range.
+
+Expected status values include:
+
+- `axis_calibration_started`
+- `axis_calibration_min_set`
+- `axis_calibration_complete`
+- `axis_calibration_failed`
+- `axis_calibration_rejected`
+
+After calibration, absolute target commands are clamped to the calibrated range and velocity motion stops at either software limit with `software_limit_hit`.
 
 ### Flow Commands
 
@@ -416,6 +462,8 @@ Boot examples:
 
 ```json
 {"type":"status","t_us":1007909,"component":"boot","status":"starting"}
+{"type":"status","t_us":1008588,"component":"motor","status":"queue_ok"}
+{"type":"status","t_us":1008595,"component":"motor","status":"velocity_mailbox_ok"}
 {"type":"status","t_us":1010052,"component":"io_expander","status":"begin_failed","severity":"warning"}
 {"type":"status","t_us":1010898,"component":"motor","status":"microstep_pins_unverified","detail":"mcp23017_missing","severity":"warning"}
 {"type":"status","t_us":1041174,"component":"boot","status":"ready_with_warnings"}
@@ -450,6 +498,10 @@ Motor state:
   "enabled": true,
   "endstop_active": false,
   "velocity_mode": false,
+  "calibration_active": false,
+  "limits_valid": true,
+  "min_limit_mm": 0,
+  "max_limit_mm": 148.5,
   "position_steps": 3200,
   "position_mm": 1.0
 }
@@ -637,12 +689,14 @@ The host should wait for `ready` or `ready_with_warnings` before sending normal 
 - The current firmware has no command IDs. A `command_queued` response only means the command was accepted into the motor queue, not that motion has completed.
 - For motor moves, host software should request `motor.status` after sending motion commands if it needs the current firmware position.
 - `motor.target_mm` and `motor.move_steps` are absolute commands.
+- `motor.velocity_mm_s` uses a latest-wins mailbox and a `2000 ms` watchdog rather than the normal FIFO command queue.
 - The motor driver is intentionally disabled after boot. The host must send `motor.enable` before motion.
 - Negative absolute motor targets are clamped to `0`.
+- After `motor.calibrate_axis` succeeds, absolute targets are clamped to the calibrated range and velocity motion stops at calibrated software limits.
 - `motor.stop` is a controlled stop, not an emergency power cutoff.
 - TMC2209 bidirectional UART readback is required for driver and StallGuard diagnostics.
-- TMC2209 StallGuard4 is configured for StealthChop and starts with the tuned defaults `SGTHRS=35` and `TCOOLTHRS=1500`. DIAG is still ignored during ordinary movement unless a bounded test or homing sequence explicitly arms it.
-- GPIO 50 is the TMC2209 DIAG input. It is captured with a rising-edge interrupt only while a bounded stall test is active.
+- TMC2209 StallGuard4 is configured for StealthChop and starts with the tuned defaults `SGTHRS=65` and `TCOOLTHRS=1500`. DIAG is ignored during ordinary movement unless a bounded test, homing sequence, or axis calibration explicitly arms it.
+- GPIO 50 is the TMC2209 DIAG input. It is captured with a rising-edge interrupt only while StallGuard motion is active.
 
 ## StallGuard4 Bring-Up Procedure
 
@@ -662,7 +716,7 @@ The host should wait for `ready` or `ready_with_warnings` before sending normal 
    {"cmd":"motor.stall_status"}
    ```
 
-   Expect `diag_gpio: 50`, `diag_pin: false`, `stall_guard_armed: false`, `sg_threshold: 35`, and `tcoolthrs: 1500`.
+   Expect `diag_gpio: 50`, `diag_pin: false`, `stall_guard_armed: false`, `sg_threshold: 65`, and `tcoolthrs: 1500`.
 
 4. Choose a fixed calibration velocity. With the configured 2 mm lead screw, `1 mm/s` equals one motor revolution every two seconds and is a reasonable initial value.
 5. Move at the calibration velocity and request `motor.stall_status` repeatedly while applying a controlled, gradually increasing mechanical load. Record the lowest `SG_RESULT` before a stall, then stop the motor.

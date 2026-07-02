@@ -6,6 +6,8 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 ### UART0 / Flow 2 On GPIO37-GPIO38
 
+**Status:** still open.
+
 **Risk:** GPIO37/GPIO38 are default UART0 boot/download/log pins, but Flow 2 also uses them.
 
 **Current code:** `HardwareSerial Flow2Serial(0);`
@@ -15,6 +17,8 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 **Test:** build, flash, confirm USB logs, then loopback GPIO37 TX to GPIO38 RX.
 
 ### Strapping Pins Used As CS/UART
+
+**Status:** partially mitigated, still open for Flow 2.
 
 **Risk:** GPIO34, GPIO35, GPIO36, GPIO37, and GPIO38 are strapping pins sampled at reset.
 
@@ -38,23 +42,33 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 ### Motor Command Queue Behavior
 
+**Status:** queue ownership fixed; velocity stale-command behavior fixed; rapid absolute target behavior still open.
+
 **Current:** `commandTask` queues motor commands; `motorTask` owns `MotorController` and applies queued commands.
 
-**Risk:** queue depth is 8, so rapid camera target updates could briefly queue stale targets.
+**Risk:** queue depth is 8, so rapid absolute target updates could briefly queue stale targets.
 
-**Later:** consider a latest-command mailbox for target/velocity updates while preserving priority handling for `stop`/future `estop`.
+**Verified/fixed:** `motor.velocity_mm_s` now uses a one-slot latest-wins mailbox plus a `2000 ms` watchdog, so stale camera velocity commands are not replayed later.
 
-**Before motor testing:** still add safe boot state, max travel, endstop test, homing routine, and `estop`.
+**Later:** consider a latest-command mailbox for absolute target updates while preserving priority handling for `stop`/future `estop`.
+
+**Verified/fixed:** safe boot state, motor enable/disable commands, bounded StallGuard test/home commands, endstop reporting, and warning-only queue setup status are implemented.
+
+**Still open:** add a true emergency-stop command/path. Normal target/velocity motion has calibrated software limits only after `motor.calibrate_axis` succeeds.
 
 ### TMC2209 Single-Wire UART
 
-**Risk:** GPIO32 single-wire UART may compile but not actually communicate with the TMC2209.
+**Status:** partially fixed/verified; hardware path remains a revision risk.
 
-**Test:** add no-motion UART test and read a known driver register before enabling movement.
+**Risk:** the TMC2209 UART path can fail if the bodge/series resistor/address wiring is wrong.
 
-**Check:** PDN_UART wiring, address pins, sense resistor, UART baud, required series resistor.
+**Verified/fixed:** no-motion diagnostics exist through `motor.driver_status` and `motor.stall_status`; firmware uses RX GPIO32 and TX GPIO23; sense resistor was corrected to `0.05 ohm`; hardware errata now calls out the required 1 kOhm series resistor.
+
+**Still open:** next PCB should route the TMC2209 UART path cleanly and keep it separate from Analog 1. Before trusting StallGuard, `motor.driver_status` must report `connection_ok:true`.
 
 ### TMC2209 Microstep Source: UART Vs MS1/MS2
+
+**Status:** partially mitigated, still hardware-dependent.
 
 **Risk:** firmware assumes `Config::kMicrosteps = 16`, and MS1/MS2 must match that setting.
 
@@ -64,7 +78,9 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 **Remaining risk:** if the MCP23017 is missing or UART config fails, the driver may use an unexpected fallback microstep mode.
 
-**Test:** verify TMC2209 UART config succeeds and read back microstep setting before trusting mm movement.
+**Verified/fixed:** firmware now warns with `microstep_pins_unverified` if the MCP23017 is missing and `motor.driver_status` reports UART microstep readback.
+
+**Test:** verify TMC2209 UART config succeeds, read back microstep setting, and verify the MCP23017 is present on I2C before trusting mm movement.
 
 **Mitigation:** missing MCP23017 is warning-only for now; verify expander status in boot JSON before motor testing.
 
@@ -72,41 +88,67 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 ### Endstop Polarity / Homing Direction
 
-**Risk:** endstop assumed active-low and bottom/home.
+**Status:** mostly verified in firmware bring-up; hardware connector still needs revision.
 
-**Test:** add command to report raw endstop state before moving motor.
+**Risk:** endstop is assumed active-low and bottom/home.
+
+**Verified/fixed:** `motor.status` reports `endstop_active`; StallGuard homing can also complete on physical endstop; bring-up confirmed endstop status/behavior.
+
+**Still open:** next hardware revision needs a dedicated endstop header/connector, already tracked in `hardware/errata.md`.
 
 ### Motor Direction / Steps Per MM
 
+**Status:** partially verified.
+
 **Risk:** current assumption is 200 steps/rev, 16 microsteps, 2 mm lead, 1600 steps/mm.
 
-**Test:** command tiny moves and measure actual direction/distance.
+**Verified/fixed:** direction convention was tested and `Config::kMotorDirectionInverted=true` is the current intended setting.
+
+**Still open:** measure actual stage travel to validate `1600 steps/mm` and the 2 mm lead assumption under real load.
 
 ### BME688 Address
 
+**Status:** verified for the current board configuration unless hardware changes.
+
 **Risk:** code defaults to `0x77`; some boards use `0x76`.
 
-**Test:** I2C scan; add autodetect if needed.
+**Observed:** current logs show the BME688 responding at the configured address. Keep `0x76` in mind for replacement boards/modules.
+
+**Later:** add autodetect if modules with mixed addresses are expected.
 
 ### I2C Bus Pullups / Conflicts
 
+**Status:** confirmed as an active hardware bring-up risk.
+
 **Risk:** shared SHT45/BME688 bus may fail from wiring, pullups, voltage, or address conflict.
 
-**Test:** I2C scan before individual sensor tests.
+**Observed:** a failed MCP23017/I/O expander connection pulled the I2C bus into an unhealthy idle-voltage state and caused MCP23017, SHT45, BME688, and SEN0496 startup failures together.
+
+**Test:** I2C scan before individual sensor tests. Healthy SDA/SCL idle should be near 3.3 V. If all I2C devices fail together, isolate the device or cable dragging the bus down.
 
 ### MAX31856 Setup
 
+**Status:** driver throughput fixed; thermocouple wiring/type validation still open.
+
 **Risk:** code assumes K-type thermocouples.
 
-**Test:** verify ambient reading and fault byte on one channel before all channels.
+**Verified/fixed:** MAX31856 devices initialize and are now configured for continuous conversion so thermocouple reads no longer block the sensor scheduler.
+
+**Still open:** wire real thermocouples and verify ambient reading/fault byte on one channel before trusting all channels.
 
 ### D6F ADC Calibration
 
+**Status:** inactive for current hardware/firmware configuration.
+
 **Risk:** ESP32 ADC voltage may not match actual D6F output exactly.
 
-**Test:** compare logged `voltage_v` to multimeter; always log raw ADC and voltage.
+**Current:** D6F runtime instance is not active because GPIO23/Analog 1 is reserved for the TMC2209 UART path on this board revision.
+
+**Later:** move the analog input or TMC UART route in hardware, then compare logged `voltage_v` to a multimeter and always log raw ADC plus voltage.
 
 ### Bronkhorst Baud / Node
+
+**Status:** still open.
 
 **Risk:** code uses `38400,n,8,1` and node `0x80`; controllers may differ.
 
@@ -136,15 +178,19 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 ### Blocking Calls / Motion Smoothness
 
+**Status:** sensor-side blocking mostly fixed; flow and motor pulse generation remain watch items.
+
 **Risk:** sensor/flow libraries may block; `AccelStepper` needs frequent service calls.
 
 **Watch for:** motor stutter, command lag, telemetry pauses.
 
-**Current behavior:** one slow sensor read can delay other sensors in `sensorTask`; a Flow 1 timeout can delay Flow 2 in `flowTask`.
+**Verified/fixed:** sensor polling is split into fast I2C, BME688, and thermocouple tasks; I2C/SPI bus access is mutex-protected; BME688 uses async start/finish so its gas-heater wait does not hold the I2C bus; MAX31856 uses continuous conversion mode.
+
+**Remaining behavior:** a Flow 1 timeout can still delay Flow 2 in `flowTask`.
 
 **Current note:** `motorTask` uses `delayMicroseconds(200)` instead of `vTaskDelay()` so `AccelStepper` is serviced more often than the FreeRTOS tick. This improves step timing but can burn CPU.
 
-**Later:** split slow devices into separate tasks, shorten timeouts, use non-blocking drivers, and consider hardware timer/RMT step generation.
+**Later:** shorten flow timeouts, consider separate flow tasks, use non-blocking flow reads if needed, and consider hardware timer/RMT step generation if motion smoothness becomes a problem.
 
 ### JSON / Heap Use
 
@@ -154,6 +200,8 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 ### Missing Host Logger
 
+**Status:** still open / belongs on the host-webapp side.
+
 **Current:** firmware streams JSONL but laptop logger is not implemented.
 
-**Later:** Python logger with laptop receive timestamps and `.jsonl` output.
+**Later:** webapp/logger should record each serial JSON line with host monotonic receive time, estimate MCU-to-host time offset, and save `.jsonl` with both MCU `t_us` and host timestamps for camera sync.

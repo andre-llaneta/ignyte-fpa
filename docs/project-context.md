@@ -48,7 +48,7 @@ xTaskCreate(thermocoupleTask, "thermo", 6144, nullptr, 2, nullptr);
 xTaskCreate(flowTask, "flow", 6144, nullptr, 2, nullptr);
 ```
 
-During some motor-only debug sessions, sensor polling tasks may be temporarily commented out in `setup()`. Re-enable them for continuous sensor sample publishing.
+The normal firmware creates all sensor and flow polling tasks in `setup()`. During some motor-only debug sessions these tasks may be temporarily commented out, but they must be re-enabled for continuous sensor and flow sample publishing.
 
 Current task roles:
 
@@ -313,12 +313,14 @@ Current mechanical assumptions:
 | Steps/mm | 1600 |
 | Max speed | 8 mm/s |
 | Max acceleration | 20 mm/s^2 |
-| StallGuard threshold | SGTHRS 55 |
+| StallGuard threshold | SGTHRS 65 |
 | StallGuard cool threshold | TCOOLTHRS 1500 |
-| Stall homing speed | -2 mm/s |
+| Stall homing speed | -4 mm/s |
 | Stall homing backoff | 2 mm |
+| Axis calibration speed | 8 mm/s |
+| Axis calibration max travel | 250 mm |
 | Motor current | 600 mA RMS |
-| Motor direction inverted | false |
+| Motor direction inverted | true |
 
 MS1/MS2 are also connected to an MCP23017 on the I2C bus. Current mapping:
 
@@ -346,13 +348,16 @@ Current motor commands:
 {"cmd":"motor.home_here"}
 {"cmd":"motor.driver_status"}
 {"cmd":"motor.driver_configure"}
-{"cmd":"motor.stall_config","sgthrs":55,"tcoolthrs":1500}
+{"cmd":"motor.stall_config","sgthrs":65,"tcoolthrs":1500}
 {"cmd":"motor.stall_status"}
 {"cmd":"motor.stall_test","mm_s":-2.0,"max_travel_mm":5.0}
 {"cmd":"motor.stall_home","max_travel_mm":70.0}
+{"cmd":"motor.calibrate_axis"}
 ```
 
-Motor commands are placed into a FreeRTOS queue and applied by `motorTask`. The current queue depth is 8. For flame tracking, a future latest-command mailbox may be better for target updates so the motor does not chase stale target positions.
+Most motor commands are placed into a FreeRTOS queue and applied by `motorTask`. The current queue depth is 8. `motor.velocity_mm_s` is the exception: it uses a one-slot latest-wins mailbox plus a `2000 ms` watchdog so camera-control velocity commands do not build up stale motion.
+
+`motor.calibrate_axis` runs a full two-ended calibration sequence. It seeks the negative end using StallGuard DIAG or the physical endstop, backs off one lead-screw revolution, sets that point to `0 mm`, seeks the positive end, backs off, stores `max_limit_mm`, enables software limits, and moves to the calibrated center. After calibration, absolute targets are clamped to the calibrated range and velocity motion stops at either software limit.
 
 `motor.stall_home` moves toward home using the configured negative homing velocity, stops on StallGuard DIAG or the physical endstop, backs off one 2 mm screw revolution, and sets the backed-off position to zero. If neither source is reached before the travel bound, it reports `stall_home_not_detected` and does not reset position.
 
@@ -367,7 +372,7 @@ Important safety assumptions:
 
 Important follow-up:
 
-- add a configured maximum travel in mm
+- validate axis calibration and calibrated software limits on the real stage
 - verify current limit before connecting the real motor
 - add proper header pins / a dedicated connector for the physical endstop in the next hardware revision
 - add a proper TMC2209 UART RX route through a 1 kOhm series resistor in the next hardware revision
@@ -437,6 +442,7 @@ Current examples:
 {"cmd":"motor.stop"}
 {"cmd":"motor.home_here"}
 {"cmd":"motor.stall_home","max_travel_mm":70.0}
+{"cmd":"motor.calibrate_axis"}
 {"cmd":"flow.set","channel":1,"pct":50}
 {"cmd":"sensor.rate","sensor":"tc1","hz":20}
 {"cmd":"i2c.scan"}
@@ -463,7 +469,7 @@ Future command protocol improvements:
 - add explicit error codes
 - add command/module split so `main.cpp` does not keep growing
 - add physical-unit flow commands
-- add safety limit commands only after validation
+- add any operator-adjustable safety limit commands only after validation
 
 ## Major Runtime Assumptions To Validate
 
@@ -481,7 +487,7 @@ The code builds successfully, but these hardware/runtime assumptions still need 
 - D6F output voltage is inside the ESP32-P4 ADC input range under all conditions if the analog input is moved off GPIO23 and the sensor is re-enabled.
 - Bronkhorst controllers use the expected baud and respond to node `0x80`.
 - Endstop polarity is active-low.
-- Motor direction polarity matches the coordinate convention with `Config::kMotorDirectionInverted=false`.
+- Motor direction polarity matches the coordinate convention with `Config::kMotorDirectionInverted=true`.
 
 ## Bring-Up Plan
 
@@ -501,7 +507,8 @@ Recommended order:
 12. Test Bronkhorst setpoint write at low/safe flow.
 13. Add a laptop logger that records JSONL with laptop receive timestamps.
 14. Add command IDs and stricter error reporting.
-15. Add safety limits for max travel, max velocity, max acceleration, and flow range.
+15. Run `motor.calibrate_axis` and validate calibrated software limits before closed-loop camera tracking.
+16. Add safety limits for flow range and a true emergency-stop path.
 
 ## Current Build Status
 

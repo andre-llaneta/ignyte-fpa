@@ -59,6 +59,10 @@ Output:
   "enabled": true,
   "endstop_active": false,
   "velocity_mode": false,
+  "calibration_active": false,
+  "limits_valid": true,
+  "min_limit_mm": 0,
+  "max_limit_mm": 148.5,
   "position_steps": 0,
   "position_mm": 0
 }
@@ -78,7 +82,7 @@ Outputs:
 
 ```json
 {"type":"status","t_us":123456,"component":"motor","status":"command_queued"}
-{"type":"status","t_us":123457,"component":"motor","status":"enabled","enabled":true,"endstop_active":false,"velocity_mode":false,"position_steps":0,"position_mm":0}
+{"type":"status","t_us":123457,"component":"motor","status":"enabled","enabled":true,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":0,"position_mm":0}
 ```
 
 ### `motor.disable`
@@ -95,7 +99,7 @@ Outputs:
 
 ```json
 {"type":"status","t_us":123456,"component":"motor","status":"command_queued"}
-{"type":"status","t_us":123457,"component":"motor","status":"disabled","enabled":false,"endstop_active":false,"velocity_mode":false,"position_steps":0,"position_mm":0}
+{"type":"status","t_us":123457,"component":"motor","status":"disabled","enabled":false,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":0,"position_mm":0}
 ```
 
 ### `motor.move_steps`
@@ -142,9 +146,14 @@ Output:
 
 Runs the motor continuously at a signed velocity in millimeters per second.
 
+Velocity commands use a latest-wins mailbox instead of the normal FIFO motor command queue. If multiple velocity commands arrive faster than the motor task services them, only the newest velocity is kept. This prevents stale camera-control velocities from being replayed later.
+
+If no new nonzero velocity command arrives within the firmware timeout, currently `2000 ms`, the firmware stops the motor and emits `velocity_watchdog_stop`.
+
 Input fields:
 
 - `mm_s`: signed numeric velocity. Positive and negative signs select opposite directions.
+- `0` stops velocity motion immediately and disarms the velocity watchdog.
 
 Input:
 
@@ -156,6 +165,18 @@ Output:
 
 ```json
 {"type":"status","t_us":123456,"component":"motor","status":"command_queued"}
+```
+
+Watchdog timeout output:
+
+```json
+{"type":"status","t_us":123456,"component":"motor","status":"velocity_watchdog_stop","enabled":true,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":true,"min_limit_mm":0,"max_limit_mm":148.5,"position_steps":12000,"position_mm":7.5}
+```
+
+If an active axis calibration is running, velocity commands are rejected:
+
+```json
+{"type":"status","t_us":123456,"component":"motor","status":"velocity_rejected","detail":"calibration_active"}
 ```
 
 ### `motor.stop`
@@ -227,7 +248,7 @@ Stops motion, cancels active StallGuard motion, and reapplies the default TMC220
 
 Current defaults include:
 
-- `SGTHRS=55`
+- `SGTHRS=65`
 - `TCOOLTHRS=1500`
 - `600 mA RMS`
 - `16` microsteps
@@ -259,7 +280,7 @@ Input fields:
 Input:
 
 ```json
-{"cmd":"motor.stall_config","sgthrs":55,"tcoolthrs":1500}
+{"cmd":"motor.stall_config","sgthrs":65,"tcoolthrs":1500}
 ```
 
 Successful outputs:
@@ -296,8 +317,8 @@ Output:
   "component": "motor",
   "status": "stall_status",
   "sg_result": 90,
-  "sg_threshold": 55,
-  "effective_sg_threshold": 110,
+  "sg_threshold": 65,
+  "effective_sg_threshold": 130,
   "tstep": 600,
   "tcoolthrs": 1500,
   "tpwmthrs": 0,
@@ -371,7 +392,7 @@ Runs bounded sensorless homing. The firmware seeks at the configured homing velo
 
 Current homing settings:
 
-- Seek velocity: `-2.0 mm/s`
+- Seek velocity: `-4.0 mm/s`
 - Backoff: `2.0 mm`
 - Maximum allowed command travel: `100 mm`
 
@@ -414,6 +435,73 @@ Rejected output:
 
 ```json
 {"type":"status","t_us":123456,"component":"motor","status":"stall_home_rejected","detail":"check_enabled_idle_diag_and_limits"}
+```
+
+### `motor.calibrate_axis`
+
+Runs full axis calibration and enables calibrated software limits. Before this command completes, software max-limit enforcement is inactive and normal motor commands behave like bring-up/manual mode.
+
+Calibration sequence:
+
+1. Seek negative at the configured calibration velocity until StallGuard DIAG or the physical endstop triggers.
+2. Back off positive by one lead-screw revolution.
+3. Set that backed-off position to `0 mm`.
+4. Seek positive until StallGuard DIAG or the physical endstop triggers.
+5. Back off negative by one lead-screw revolution.
+6. Store the backed-off position as `max_limit_mm`.
+7. Move automatically to the center between `0` and `max_limit_mm`.
+
+Current calibration settings:
+
+- Seek velocity: `8.0 mm/s`
+- Backoff: `2.0 mm`
+- Maximum seek travel per direction: `250 mm`
+
+Input fields:
+
+- `max_travel_mm`: optional positive safety cap for each seek direction, maximum `250`. If omitted, firmware uses `250`.
+
+Input:
+
+```json
+{"cmd":"motor.calibrate_axis","max_travel_mm":250.0}
+```
+
+Start outputs:
+
+```json
+{"type":"status","t_us":123456,"component":"motor","status":"command_queued"}
+{"type":"status","t_us":123457,"component":"motor","status":"axis_calibration_started","enabled":true,"endstop_active":false,"velocity_mode":true,"calibration_active":true,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":1000,"position_mm":0.625}
+```
+
+Lower end found and zero set after backoff:
+
+```json
+{"type":"status","t_us":123458,"component":"motor","status":"axis_calibration_min_set","position_steps":0,"position_mm":0,"endstop_active":false,"calibration_active":true,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0}
+```
+
+Successful completion after the firmware stores the max limit and moves to the center:
+
+```json
+{"type":"status","t_us":123459,"component":"motor","status":"axis_calibration_complete","position_steps":118800,"position_mm":74.25,"endstop_active":false,"calibration_active":false,"limits_valid":true,"min_limit_mm":0,"max_limit_mm":148.5}
+```
+
+Travel safety cap hit before an end was detected:
+
+```json
+{"type":"status","t_us":123459,"component":"motor","status":"axis_calibration_failed","position_steps":400000,"position_mm":250,"endstop_active":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0}
+```
+
+Rejected output:
+
+```json
+{"type":"status","t_us":123456,"component":"motor","status":"axis_calibration_rejected","detail":"check_enabled_idle_diag_and_limits"}
+```
+
+After calibration, position commands are clamped to the calibrated range and velocity motion is stopped at either limit. Limit hits emit:
+
+```json
+{"type":"status","t_us":123456,"component":"motor","status":"software_limit_hit","position_steps":237600,"position_mm":148.5,"endstop_active":false,"calibration_active":false,"limits_valid":true,"min_limit_mm":0,"max_limit_mm":148.5}
 ```
 
 ## Sensor And Bus Commands
@@ -500,7 +588,7 @@ Unknown sensor output:
 {"type":"status","t_us":123456,"component":"sensor","status":"not_found","detail":"bad_name"}
 ```
 
-Current-code note: the firmware uses separate sensor polling tasks for fast I2C sensors, BME688, and thermocouples. During motor-only debug, those tasks may be temporarily commented out; if disabled, `sensor.rate` still updates the stored rate but samples will not be published for the disabled task group.
+Current-code note: the firmware creates separate polling tasks for fast I2C sensors, BME688, thermocouples, and flow readback. If a future motor-only debug build temporarily disables those tasks, `sensor.rate` still updates the stored rate but samples will not be published for the disabled task group.
 
 ## Flow Controller Commands
 
@@ -542,6 +630,7 @@ Typical boot messages:
 ```json
 {"type":"status","t_us":1007909,"component":"boot","status":"starting"}
 {"type":"status","t_us":1008588,"component":"motor","status":"queue_ok"}
+{"type":"status","t_us":1008595,"component":"motor","status":"velocity_mailbox_ok"}
 {"type":"status","t_us":1010052,"component":"io_expander","status":"begin_ok"}
 {"type":"status","t_us":1035638,"component":"tc1","status":"begin_ok"}
 {"type":"status","t_us":1039022,"component":"sht45","status":"begin_ok"}

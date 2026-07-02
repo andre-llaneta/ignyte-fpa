@@ -14,6 +14,37 @@ Why:
 Verification:
 ```
 
+## 2026-07-02 - Motor Calibration And OpenCV Serial Docs Synced
+
+What changed:
+
+- Updated Markdown docs to match the current firmware motor behavior: velocity latest-wins mailbox, `2000 ms` velocity watchdog, axis calibration, calibrated software limits, and expanded motor status fields.
+- Updated documented motor constants to current firmware values: `SGTHRS=65`, stall homing velocity `-4.0 mm/s`, axis calibration velocity `8.0 mm/s`, and inverted motor direction enabled.
+- Updated camera/OpenCV docs to reflect that the prototype now connects over Web Serial, sends manual motor commands, supports Calibrate Axis, and can run rate-limited auto control.
+
+Why:
+
+The docs had drifted while motor calibration and OpenCV serial-control bring-up moved quickly. Keeping protocol docs aligned with firmware behavior prevents webapp and test-script work from using stale command assumptions.
+
+Verification:
+
+Compared docs against `firmware/p4-sensor-hub-arduino/include/AppConfig.h`, `firmware/p4-sensor-hub-arduino/src/main.cpp`, and the OpenCV prototype source.
+
+## 2026-06-30 - Sensor Telemetry Verified In Web App
+
+What changed:
+
+- Confirmed that the BME688, SHT45, and MAX31856 thermocouple sensors are working as expected on the current hardware/firmware setup.
+- Confirmed that their firmware JSON telemetry reaches the Ignyte web app and is displayed there as live readings.
+
+Why:
+
+This verifies the end-to-end sensor path from physical sensor hardware through ESP32-P4 firmware JSON output into the operator web app. It reduces risk around the current sensor interfaces before adding camera/OpenCV tracking and tighter experiment orchestration.
+
+Verification:
+
+Hardware/webapp bring-up confirmed live readings for BME688, SHT45, and thermocouple channels in the Ignyte web app.
+
 ## 2026-06-24 - Sensor Sampling Throughput Fix
 
 What changed:
