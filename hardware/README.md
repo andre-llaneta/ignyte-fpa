@@ -1,8 +1,4 @@
-# Hardware
-
-Hardware design files and manufacturing exports for the IgNYte-FPA support electronics.
-
-## motherV1
+# motherV1
 
 `motherV1` is the first fabricated and tested breakout/interface DAQ board for the ESP32-P4 sensor hub. The board is designed around the DFRobot FireBeetle 2 ESP32-P4 and provides the electrical interface between the firmware, sensors, motor stage electronics, flow controllers, and board-level power rails.
 
