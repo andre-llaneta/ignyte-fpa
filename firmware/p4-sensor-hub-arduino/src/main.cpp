@@ -805,10 +805,10 @@ void setup() {
 
   xTaskCreate(motorTask, "motor", 4096, nullptr, 5, nullptr);
   xTaskCreate(commandTask, "commands", 6144, nullptr, 3, nullptr);
-  xTaskCreate(fastI2cSensorTask, "fast_i2c", 6144, nullptr, 2, nullptr);
-  xTaskCreate(bmeSensorTask, "bme688", 4096, nullptr, 2, nullptr);
-  xTaskCreate(thermocoupleTask, "thermo", 6144, nullptr, 2, nullptr);
-  xTaskCreate(flowTask, "flow", 6144, nullptr, 2, nullptr);
+ // xTaskCreate(fastI2cSensorTask, "fast_i2c", 6144, nullptr, 2, nullptr);
+//  xTaskCreate(bmeSensorTask, "bme688", 4096, nullptr, 2, nullptr);
+ // xTaskCreate(thermocoupleTask, "thermo", 6144, nullptr, 2, nullptr);
+//  xTaskCreate(flowTask, "flow", 6144, nullptr, 2, nullptr);
 
   publishStatus("boot", bootWarnings ? "ready_with_warnings" : "ready");
 }

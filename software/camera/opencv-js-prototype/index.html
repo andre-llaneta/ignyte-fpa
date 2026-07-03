@@ -87,6 +87,9 @@
 
         <fieldset>
           <legend>1D Recommendation</legend>
+          <button id="controllerModeButton" type="button">
+            Controller: P
+          </button>
           <label>
             <span class="label-row">Setpoint row <output id="setpointValue"></output></span>
             <input id="setpointSlider" type="range" min="0" max="1000" />
@@ -98,6 +101,10 @@
           <label>
             Kp mm/s/px
             <input id="kpInput" type="number" min="0" step="0.0005" />
+          </label>
+          <label>
+            Ki mm/s/(px*s)
+            <input id="kiInput" type="number" min="0" step="0.0005" />
           </label>
           <label>
             Max velocity mm/s

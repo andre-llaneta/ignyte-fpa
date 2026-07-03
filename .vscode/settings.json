@@ -32,5 +32,12 @@
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=C:\\Users\\llane\\OneDrive\\Documents\\GithubRepos\\IgNYte-FPA\\firmware\\p4-sensor-hub\\build"
+  ],
+  "python-envs.pythonProjects": [
+    {
+      "path": ".",
+      "envManager": "ms-python.python:system",
+      "packageManager": "ms-python.python:pip"
+    }
   ]
 }

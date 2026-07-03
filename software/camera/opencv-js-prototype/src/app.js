@@ -1,4 +1,4 @@
-import { computeRecommendation } from "./controller.js"
+import { computePRecommendation, computePIRecommendation, resetControllerState } from "./controller.js"
 import { DEFAULT_CONFIG } from "./config.js"
 import { detectTarget } from "./detector.js"
 import { buildTrackingMessage } from "./messages.js"
@@ -31,8 +31,10 @@ const els = {
   kernelInput: document.getElementById("kernelInput"),
   setpointSlider: document.getElementById("setpointSlider"),
   setpointValue: document.getElementById("setpointValue"),
+  controllerModeButton: document.getElementById("controllerModeButton"),
   deadbandInput: document.getElementById("deadbandInput"),
   kpInput: document.getElementById("kpInput"),
+  kiInput: document.getElementById("kiInput"),
   maxVelocityInput: document.getElementById("maxVelocityInput"),
   controlSignSelect: document.getElementById("controlSignSelect"),
   processFpsInput: document.getElementById("processFpsInput"),
@@ -78,6 +80,11 @@ const state = {
   autoControlEnabled: false,
   lastAutoControlMs: 0,
   autoControlSendActive: false,
+  controllerMode: DEFAULT_CONFIG.controller.mode,
+  controllerState: {
+    integralErrorPxS: 0,
+    lastUpdateMs: null,
+  },
 }
 
 const serialController = createSerialController({
@@ -131,6 +138,7 @@ function bindEventHandlers() {
   els.motorDisableButton.addEventListener("click", () =>
     void disableMotorSafely(),
   )
+  els.controllerModeButton.addEventListener("click", toggleControllerMode)
   els.sendRecommendationButton.addEventListener("click", () =>
     void serialController.sendCurrentRecommendation(
       state.latestTracking,
@@ -138,6 +146,18 @@ function bindEventHandlers() {
     ),
   )
   els.autoControlButton.addEventListener("click", () => toggleAutoControl())
+}
+
+function toggleControllerMode() {
+  state.controllerMode = state.controllerMode === "pi" ? "p" : "pi"
+  resetControllerState()
+  updateControllerModeButton()
+}
+
+function updateControllerModeButton() {
+  const isPi = state.controllerMode === "pi"
+  els.controllerModeButton.textContent = isPi ? "Controller: PI" : "Controller: P"
+  els.controllerModeButton.classList.toggle("active", isPi)
 }
 
 function bindSliderReadouts() {
@@ -183,9 +203,11 @@ function applyDefaultConfig() {
   )
   els.deadbandInput.value = DEFAULT_CONFIG.controller.deadbandPx
   els.kpInput.value = DEFAULT_CONFIG.controller.kpMmSPerPx
+  els.kiInput.value = DEFAULT_CONFIG.controller.kiMmSPerPxS
   els.maxVelocityInput.value = DEFAULT_CONFIG.controller.maxVelocityMmS
   els.controlSignSelect.value = String(DEFAULT_CONFIG.controller.controlSign)
   els.processFpsInput.value = DEFAULT_CONFIG.controller.processFps
+  updateControllerModeButton()
 }
 
 function waitForOpenCv() {
@@ -285,6 +307,7 @@ async function startCamera() {
     els.stopButton.disabled = false
     els.applyCameraConstraintsButton.disabled = !state.activeTrack
     setStatus(els.cameraStatus, "Camera running", "good")
+    resetControllerState()
     state.processing = true
     state.lastProcessMs = 0
     state.animationId = requestAnimationFrame(processLoop)
@@ -314,6 +337,7 @@ function stopCamera() {
   els.startButton.disabled = false
   els.stopButton.disabled = true
   els.applyCameraConstraintsButton.disabled = true
+  resetControllerState()
   setStatus(els.cameraStatus, "Camera stopped", "muted")
 }
 
@@ -359,10 +383,11 @@ function processLoop(nowMs) {
   }
 
   const controlOptions = readControlOptions()
-  const { setpointYPx, errorYPx, recommendation } = computeRecommendation(
+  const { setpointYPx, errorYPx, recommendation } = computeControllerRecommendation(
     detection,
     els.frameCanvas.height,
     controlOptions,
+    nowMs,
   )
   drawOverlay(overlayContext, detection, setpointYPx, errorYPx, recommendation)
 
@@ -388,6 +413,22 @@ function processLoop(nowMs) {
     state.lastAutoControlMs = nowMs
     void sendAutoControlRecommendation()
   }
+}
+
+function computeControllerRecommendation(detection, frameHeight, controlOptions, nowMs) {
+  if (controlOptions.mode === "pi") {
+    const result = computePIRecommendation(
+      detection,
+      frameHeight,
+      controlOptions,
+      state.controllerState,
+      nowMs,
+    )
+    state.controllerState = result.controllerState
+    return result
+  }
+
+  return computePRecommendation(detection, frameHeight, controlOptions)
 }
 
 function updateSerialButtons(connected) {
@@ -421,6 +462,7 @@ function toggleAutoControl() {
 function setAutoControlEnabled(enabled) {
   state.autoControlEnabled = enabled
   state.lastAutoControlMs = 0
+  resetControllerState()
   els.autoControlButton.textContent = enabled
     ? "Auto Control On"
     : "Auto Control Off"
@@ -524,6 +566,7 @@ function readDetectorOptions() {
 
 function readControlOptions() {
   return {
+    mode: state.controllerMode,
     setpointYNorm:
       numberValue(
         els.setpointSlider,
@@ -537,6 +580,11 @@ function readControlOptions() {
       els.kpInput,
       DEFAULT_CONFIG.controller.kpMmSPerPx,
     ),
+    kiMmSPerPxS: numberValue(
+      els.kiInput,
+      DEFAULT_CONFIG.controller.kiMmSPerPxS,
+    ),
+    maxIntegralErrorPxS: DEFAULT_CONFIG.controller.maxIntegralErrorPxS,
     maxVelocityMmS: numberValue(
       els.maxVelocityInput,
       DEFAULT_CONFIG.controller.maxVelocityMmS,
