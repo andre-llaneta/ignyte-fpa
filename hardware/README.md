@@ -1,6 +1,6 @@
 # motherV1
 
-`motherV1` is the first fabricated and tested breakout/interface DAQ board for the ESP32-P4 sensor hub. The board is designed around the DFRobot FireBeetle 2 ESP32-P4 and provides the electrical interface between the firmware, sensors, motor stage electronics, flow controllers, and board-level power rails.
+`motherV1` is a fabricated and tested custom DAQ/interface motherboard for the IgNYte-FPA ESP32-P4 sensor hub. It consolidates the apparatus support electronics onto one PCB, mounting the FireBeetle 2 ESP32-P4, sensor breakout interfaces, TMC2209 stepper-driver interface, RS232 flow-controller interfaces, and 20 V / 5 V / 3.3 V power distribution used for fire-propagation apparatus bring-up and firmware integration.
 
 The board is intended to reduce loose wiring during apparatus bring-up by collecting the major support electronics on one PCB:
 
@@ -53,6 +53,20 @@ The `hardware/motherV1/jlcpcb/` directory contains manufacturing/export files fo
 `motherV1` has been fabricated and tested. The board is usable for current bring-up and firmware integration work, but it has known revision notes that should be addressed before a future hardware revision.
 
 See [errata.md](./errata.md) for confirmed hardware issues and next-revision recommendations.
+
+## Validation Summary
+
+| Subsystem | Status | Evidence |
+| --- | --- | --- |
+| 20 V input | Validated | Measured voltage/current |
+| 5 V buck | Validated | No-load/load voltage |
+| 3.3 V buck | Validated | No-load/load voltage |
+| FireBeetle headers | Usable with errata | Footprint offset noted |
+| I2C sensors | Validated | Scan + telemetry |
+| Thermocouples | Validated | MAX31856 telemetry |
+| TMC2209 | Validated with bodge | UART/status/motion |
+| Endstop | Works, needs connector | Errata |
+| Flow RS232 | Pending controllers | Planned test |
 
 ## Known Errata Summary
 
