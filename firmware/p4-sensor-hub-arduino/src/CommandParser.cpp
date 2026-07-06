@@ -22,8 +22,7 @@ ParsedCommand errorCommand(const char* component, const char* status, const char
   ParsedCommand command;
   command.errorComponent = component;
   command.errorStatus = status;
-  copyText(command.errorDetailStorage, sizeof(command.errorDetailStorage), detail);
-  command.errorDetail = command.errorDetailStorage;
+  copyText(command.errorDetail, sizeof(command.errorDetail), detail);
   return command;
 }
 
@@ -122,8 +121,7 @@ ParsedCommand parseCommand(const JsonDocument& doc) {
     command.value = clampFloat(doc["pct"] | 0.0f, 0.0f, 100.0f);
   } else if (std::strcmp(cmd, "sensor.rate") == 0) {
     command.type = ParsedCommandType::SensorRate;
-    copyText(command.nameStorage, sizeof(command.nameStorage), doc["sensor"] | "");
-    command.name = command.nameStorage;
+    copyText(command.name, sizeof(command.name), doc["sensor"] | "");
     if (doc["hz"].is<int>()) {
       command.hasIntValue = true;
       command.intValue = doc["hz"].as<int>();
