@@ -4,11 +4,26 @@
 #include <cstring>
 
 namespace {
+void copyText(char* destination, size_t destinationSize, const char* source) {
+  if (destinationSize == 0) {
+    return;
+  }
+
+  if (source == nullptr) {
+    destination[0] = '\0';
+    return;
+  }
+
+  std::strncpy(destination, source, destinationSize - 1);
+  destination[destinationSize - 1] = '\0';
+}
+
 ParsedCommand errorCommand(const char* component, const char* status, const char* detail) {
   ParsedCommand command;
   command.errorComponent = component;
   command.errorStatus = status;
-  command.errorDetail = detail;
+  copyText(command.errorDetailStorage, sizeof(command.errorDetailStorage), detail);
+  command.errorDetail = command.errorDetailStorage;
   return command;
 }
 
@@ -107,7 +122,8 @@ ParsedCommand parseCommand(const JsonDocument& doc) {
     command.value = clampFloat(doc["pct"] | 0.0f, 0.0f, 100.0f);
   } else if (std::strcmp(cmd, "sensor.rate") == 0) {
     command.type = ParsedCommandType::SensorRate;
-    command.name = doc["sensor"] | "";
+    copyText(command.nameStorage, sizeof(command.nameStorage), doc["sensor"] | "");
+    command.name = command.nameStorage;
     if (doc["hz"].is<int>()) {
       command.hasIntValue = true;
       command.intValue = doc["hz"].as<int>();

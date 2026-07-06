@@ -28,12 +28,14 @@ struct ParsedCommand {
   const char* errorComponent = nullptr;
   const char* errorStatus = nullptr;
   const char* errorDetail = nullptr;
+  char errorDetailStorage[48] = {};
   float value = 0.0f;
   float limit = 0.0f;
   int32_t intValue = 0;
   uint32_t raw = 0;
   uint8_t channel = 1;
   const char* name = "";
+  char nameStorage[32] = {};
   bool hasIntValue = false;
 };
 
