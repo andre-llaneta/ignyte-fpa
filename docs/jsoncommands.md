@@ -57,6 +57,7 @@ Output:
   "component": "motor",
   "status": "state",
   "enabled": true,
+  "step_generator_ready": true,
   "endstop_active": false,
   "velocity_mode": false,
   "calibration_active": false,
@@ -82,7 +83,7 @@ Outputs:
 
 ```json
 {"type":"status","t_us":123456,"component":"motor","status":"command_queued"}
-{"type":"status","t_us":123457,"component":"motor","status":"enabled","enabled":true,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":0,"position_mm":0}
+{"type":"status","t_us":123457,"component":"motor","status":"enabled","enabled":true,"step_generator_ready":true,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":0,"position_mm":0}
 ```
 
 ### `motor.disable`
@@ -99,12 +100,12 @@ Outputs:
 
 ```json
 {"type":"status","t_us":123456,"component":"motor","status":"command_queued"}
-{"type":"status","t_us":123457,"component":"motor","status":"disabled","enabled":false,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":0,"position_mm":0}
+{"type":"status","t_us":123457,"component":"motor","status":"disabled","enabled":false,"step_generator_ready":true,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":0,"position_mm":0}
 ```
 
 ### `motor.target_mm`
 
-Moves to an absolute target position in millimeters.
+Moves to an absolute target position in millimeters. This command requires a completed `motor.calibrate_axis` run so calibrated software limits are valid.
 
 Input fields:
 
@@ -122,9 +123,11 @@ Output:
 {"type":"status","t_us":123456,"component":"motor","status":"command_queued"}
 ```
 
+If calibration has not completed, the firmware rejects the move and reports `calibration_incomplete`.
+
 ### `motor.velocity_mm_s`
 
-Runs the motor continuously at a signed velocity in millimeters per second.
+Runs the motor continuously at a signed velocity in millimeters per second. Nonzero velocity commands require a completed `motor.calibrate_axis` run so calibrated software limits are valid.
 
 Velocity commands use a latest-wins mailbox instead of the normal FIFO motor command queue. If multiple velocity commands arrive faster than the motor task services them, only the newest velocity is kept. This prevents stale camera-control velocities from being replayed later.
 
@@ -158,6 +161,8 @@ If an active axis calibration is running, velocity commands are rejected:
 ```json
 {"type":"status","t_us":123456,"component":"motor","status":"velocity_rejected","detail":"calibration_active"}
 ```
+
+If calibration has not completed, nonzero velocity commands are rejected with `calibration_incomplete`.
 
 ### `motor.stop`
 
@@ -215,8 +220,8 @@ Output:
   "ioin": 0,
   "version": 33,
   "drv_status": 0,
-  "rms_current_ma": 600,
-  "microsteps": 8
+  "rms_current_ma": 900,
+  "microsteps": 4
 }
 ```
 
@@ -228,13 +233,13 @@ Configures the TMC2209 StallGuard threshold and lower velocity-window threshold.
 
 Input fields:
 
-- `sgthrs`: integer `0..255`. Higher values are more sensitive and detect earlier. Current firmware default is `158`.
+- `sgthrs`: integer `0..255`. Higher values are more sensitive and detect earlier. Current firmware default is `160`.
 - `tcoolthrs`: integer `0..1048575`.
 
 Input:
 
 ```json
-{"cmd":"motor.stall_config","sgthrs":158,"tcoolthrs":1500}
+{"cmd":"motor.stall_config","sgthrs":160,"tcoolthrs":1500}
 ```
 
 Successful outputs:
@@ -271,8 +276,8 @@ Output:
   "component": "motor",
   "status": "stall_status",
   "sg_result": 90,
-  "sg_threshold": 158,
-  "effective_sg_threshold": 316,
+  "sg_threshold": 160,
+  "effective_sg_threshold": 320,
   "tstep": 600,
   "tcoolthrs": 1500,
   "tpwmthrs": 0,
@@ -293,7 +298,7 @@ Output:
 
 ### `motor.stall_test`
 
-Starts a bounded constant-velocity StallGuard test and arms the DIAG GPIO 50 interrupt.
+Starts a bounded StallGuard test and arms the DIAG GPIO 50 interrupt. The test uses the StallGuard driver profile, which enables StealthChop for DIAG detection. When the test ends or is cancelled, the firmware restores the normal SpreadCycle profile.
 
 Input fields:
 
@@ -339,7 +344,7 @@ Rejected output:
 
 ### `motor.calibrate_axis`
 
-Runs full axis calibration and enables calibrated software limits. Before this command completes, software max-limit enforcement is inactive and normal motor commands behave like bring-up/manual mode.
+Runs full axis calibration and enables calibrated software limits. Before this command completes, normal `motor.target_mm` and nonzero `motor.velocity_mm_s` commands are rejected with `calibration_incomplete`.
 
 Calibration sequence:
 
@@ -353,19 +358,20 @@ Calibration sequence:
 
 Current calibration settings:
 
-- Seek velocity: `20.0 mm/s`
+- Seek/backoff/center velocity cap: `10.0 mm/s`
 - Backoff: `2.0 mm`
-- Maximum seek travel per direction: `300 mm`
+- Maximum seek travel per direction: `210 mm`
 - The positive/max seek ignores DIAG for the first `2000 ms` after switching from the min-side backoff so stale or re-latched DIAG events do not immediately end calibration.
+- Axis calibration uses StealthChop while seeking, backing off, and moving to center, then waits briefly and restores the normal SpreadCycle profile after calibration completes.
 
 Input fields:
 
-- `max_travel_mm`: optional positive safety cap for each seek direction, maximum `300`. If omitted, firmware uses `300`.
+- `max_travel_mm`: optional positive safety cap for each seek direction, maximum `210`. If omitted, firmware uses `210`.
 
 Input:
 
 ```json
-{"cmd":"motor.calibrate_axis","max_travel_mm":300.0}
+{"cmd":"motor.calibrate_axis","max_travel_mm":210.0}
 ```
 
 Start outputs:

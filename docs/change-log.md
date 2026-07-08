@@ -14,6 +14,79 @@ Why:
 Verification:
 ```
 
+## 2026-07-08 - Tune Motor Driver Profiles And Calibration Speed
+
+What changed:
+
+- Normal target and velocity motion now use the normal TMC2209 driver profile with SpreadCycle enabled.
+- StallGuard test and axis calibration switch into a StallGuard profile with StealthChop enabled before DIAG-based motion starts.
+- Axis calibration restores the normal SpreadCycle profile after the final center move completes, with a short settle delay before the profile switch.
+- Calibration position moves, including backoff and center travel, are now capped by `Config::kAxisCalibrationVelocityMmS` instead of the normal max stage speed.
+- Updated the documented motor constants to the current source values: `4` microsteps, `400 steps/mm`, `25 mm/s` max speed, `40 mm/s^2` max acceleration, `10 mm/s` calibration speed, `210 mm` max calibration travel, and `SGTHRS=160`.
+
+Why:
+
+StallGuard calibration is more reliable in the StealthChop operating window, while normal stage tracking is more stable at higher speeds in SpreadCycle. The final calibration center move was stalling when it used the normal motion speed cap, so calibration moves now use the same conservative speed limit as calibration seeks.
+
+Verification:
+
+Hardware testing showed improved high-speed behavior compared with the previous polling-based STEP generation, but the stage still has a repeatable mechanical sticking point that should be treated as a hardware issue.
+
+## 2026-07-08 - Move STEP Generation To ESP32-P4 Hardware
+
+What changed:
+
+- Replaced AccelStepper polling with an ESP32-P4 MCPWM STEP generator and PCNT commanded-position counter.
+- Added `HardwareStepGenerator` to own STEP frequency, DIR changes, immediate output suppression, and signed pulse counting.
+- Added a stopping-distance position planner for absolute moves, calibration backoffs, and calibration centering.
+- Changed calibration seeks and bounded stall tests to accelerate from rest instead of jumping directly to their requested velocity.
+- Deferred StallGuard interrupt arming until MCPWM reaches the lower of the requested velocity or the configured 10 mm/s arming threshold, avoiding false startup detections while the motor accelerates.
+- Changed `motorTask` to update motion state every 1 ms while MCPWM generates pulses independently.
+- Removed the AccelStepper dependency.
+
+Why:
+
+At the previous 8-microstep setting and 800 steps/mm, 40 mm/s required a stable 32 kHz STEP signal. The previous task loop periodically slept for 1 ms, so `runSpeed()` could not issue every required pulse even when its configured speed reported 40 mm/s.
+
+Verification:
+
+Hardware testing confirmed that MCPWM-generated motion runs independently of the 1 ms motor-task service period and improves the stage's usable speed over the polling-based implementation. Axis calibration, centering, normal velocity motion, and driver-profile switching were exercised on the stage; the repeatable mechanical sticking point remains under investigation.
+
+## 2026-07-08 - Add Acceleration-Limited Velocity Control
+
+What changed:
+
+- Normal `motor.velocity_mm_s` commands now ramp the applied velocity toward the requested velocity using the configured stage acceleration.
+- Repeated velocity commands continue from the current applied velocity instead of restarting the ramp.
+- Explicit stops, watchdog stops, limit stops, and stall events remain immediate.
+- Axis calibration reapplies the default TMC2209 configuration before beginning, allowing calibration to recover if the driver was unpowered during initial firmware startup.
+
+Why:
+
+Jumping directly from rest to a high STEP rate could stall the stage and place unnecessary mechanical load on the motor. Controlled acceleration makes normal tracking commands smoother without weakening safety-related stop behavior.
+
+Verification:
+
+The acceleration behavior and immediate-stop behavior were tested on the stage before the hardware-timed STEP generator replaced the polling-based implementation.
+
+## 2026-07-08 - Add Flame-Velocity Feedforward
+
+What changed:
+
+- Added optional feedforward to both P and PI tracking modes.
+- Estimate flame image velocity from successive detected bottom-point positions and smooth it with a configurable filter.
+- Estimate the camera's applied velocity using the firmware acceleration limit and the previously commanded motor velocity.
+- Combine estimated flame motion, feedback velocity, and feedforward velocity into the final motor recommendation.
+- Added feedforward controls and diagnostics for gain, `mmPerPx`, image-velocity smoothing, estimated motor velocity, and the separate feedback/feedforward contributions.
+
+Why:
+
+P and PI feedback only react after the flame moves away from the target row. Feedforward uses estimated flame motion to command some matching stage velocity earlier and reduce tracking lag.
+
+Verification:
+
+The prototype was exercised with the camera and firmware interface. Feedforward remains optional because `mmPerPx`, smoothing, and gain require tuning for the final camera geometry and flame behavior.
+
 ## 2026-07-06 - Remove Obsolete Motor JSON Commands
 
 What changed:

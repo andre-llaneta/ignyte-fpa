@@ -64,20 +64,25 @@ constexpr uint8_t kBronkhorstNodePointToPoint = 0x80;
 
 constexpr float kStepperFullStepsPerRev = 200.0f;
 constexpr float kLeadScrewMmPerRev = 2.0f;
-constexpr uint16_t kMicrosteps = 8;
+constexpr uint16_t kMicrosteps = 4;
 constexpr float kStepsPerMm =
     (kStepperFullStepsPerRev * static_cast<float>(kMicrosteps)) / kLeadScrewMmPerRev;
 
-constexpr float kMaxStageSpeedMmS = 40.0f;
-constexpr float kMaxStageAccelMmS2 = 100.0f;
+constexpr float kMaxStageSpeedMmS = 25.0f;
+constexpr float kMaxStageAccelMmS2 = 40.0f;
+constexpr uint32_t kStepTimerResolutionHz = 4000000;
+constexpr uint32_t kStepTimerMaxPeriodTicks = 65535;
+constexpr uint32_t kMotorServicePeriodMs = 1;
+constexpr uint32_t kMotorDirectionSetupUs = 2;
 constexpr uint32_t kMotorVelocityCommandTimeoutMs = 2000;
-constexpr float kAxisCalibrationVelocityMmS = 20.0f;
+constexpr float kAxisCalibrationVelocityMmS = 10.0f;
 constexpr float kAxisCalibrationBackoffMm = kLeadScrewMmPerRev;
-constexpr float kAxisCalibrationMaxTravelMm = 300.0f;
+constexpr float kAxisCalibrationMaxTravelMm = 210.0f;
 constexpr float kMaxStallTestTravelMm = 200.0f;
-constexpr uint8_t kStallGuardThreshold = 150;
-constexpr uint8_t kAxisCalibrationSeekMinSgthrs = 150;
-constexpr uint8_t kAxisCalibrationSeekMaxSgthrs = 150;
+constexpr uint8_t kStallGuardThreshold = 160;
+constexpr uint8_t kAxisCalibrationSeekMinSgthrs = 160;
+constexpr uint8_t kAxisCalibrationSeekMaxSgthrs = 160;
+constexpr float kStallGuardArmVelocityMmS = 10.0f;
 constexpr uint32_t kAxisCalibrationSeekMaxDiagIgnoreMs = 2000;
 constexpr uint32_t kStallGuardCoolThreshold = 1500;
 constexpr bool kMotorDirectionInverted = true;

@@ -52,7 +52,7 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 **Later:** consider a latest-command mailbox for absolute target updates while preserving priority handling for `stop`/future `estop`.
 
-**Verified/fixed:** safe boot state, motor enable/disable commands, bounded StallGuard test/home commands, endstop reporting, and warning-only queue setup status are implemented.
+**Verified/fixed:** safe boot state, motor enable/disable commands, bounded StallGuard test/axis-calibration commands, endstop reporting, and warning-only queue setup status are implemented.
 
 **Still open:** add a true emergency-stop command/path. Normal target/velocity motion has calibrated software limits only after `motor.calibrate_axis` succeeds.
 
@@ -70,13 +70,13 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 **Status:** partially mitigated, still hardware-dependent.
 
-**Risk:** firmware assumes `Config::kMicrosteps = 8`, and MS1/MS2 plus the TMC2209 UART-configured microstep value must match that setting.
+**Risk:** firmware assumes `Config::kMicrosteps = 4`, but the MCP23017 MS1/MS2 helper only supports the standalone-driver choices `8`, `16`, `32`, and `64`.
 
 **Current hardware:** MCP23017 address `0x20`; MS1 = GPA1/A1, MS2 = GPA0/A0. Address can change via jumper pads.
 
-**Current code:** `IoExpander` sets MS1/MS2 from `Config::kMicrosteps`; for 1/8, MS1 is driven high and MS2 is driven low before `motor.begin()`. The firmware also writes the microstep setting over TMC2209 UART.
+**Current code:** `IoExpander::setMotorMicrosteps(4)` returns false and produces the `motor_microsteps_invalid` boot warning. `MotorController::configureDriver()` then enables `mstep_reg_select(true)` and writes the 4-microstep setting over TMC2209 UART.
 
-**Remaining risk:** if the MCP23017 is missing or UART config fails, the driver may use an unexpected fallback microstep mode.
+**Remaining risk:** if UART configuration fails, the driver may use an unexpected pin-selected fallback mode while firmware continues calculating motion at `400 steps/mm`.
 
 **Verified/fixed:** firmware now warns with `microstep_pins_unverified` if the MCP23017 is missing and `motor.driver_status` reports UART microstep readback.
 
@@ -92,19 +92,31 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 **Risk:** endstop is assumed active-low and bottom/home.
 
-**Verified/fixed:** `motor.status` reports `endstop_active`; StallGuard homing can also complete on physical endstop; bring-up confirmed endstop status/behavior.
+**Verified/fixed:** `motor.status` reports `endstop_active`; axis calibration can also complete on physical endstop; bring-up confirmed endstop status/behavior.
 
 **Still open:** next hardware revision needs a dedicated endstop header/connector, already tracked in `hardware/errata.md`.
+
+### Vertical Stage Mechanical Binding / Directional Speed Limit
+
+**Status:** active hardware issue.
+
+**Risk:** the stage has shown a repeatable sticking point at the same physical travel location, and downward motion is less reliable than upward motion at the same commanded speed. This points to mechanical binding, cable drag, rail/screw alignment, backlash, or gravity-assisted resonance rather than a pure firmware step-generation limit.
+
+**Current behavior:** hardware-timed STEP generation improved the achievable speed compared with the previous polling path, but the supplier headline speed should not be treated as guaranteed on the assembled vertical camera stage.
+
+**Test:** power off and hand-drive the screw through the full travel, test unloaded/with cable slack, run both directions at `2..5 mm/s`, and confirm whether the bind occurs at the same height or once per screw revolution.
+
+**Mitigation:** fix mechanical binding before raising current or forcing through the spot. If the mechanism is otherwise acceptable, consider asymmetric speed limits for up/down tracking motion.
 
 ### Motor Direction / Steps Per MM
 
 **Status:** partially verified.
 
-**Risk:** current assumption is 200 steps/rev, 8 microsteps, 2 mm lead, 800 steps/mm.
+**Risk:** current assumption is 200 steps/rev, 4 microsteps, 2 mm lead, 400 steps/mm.
 
 **Verified/fixed:** direction convention was tested and `Config::kMotorDirectionInverted=true` is the current intended setting.
 
-**Still open:** measure actual stage travel to validate `800 steps/mm` and the 2 mm lead assumption under real load.
+**Still open:** measure actual stage travel to validate `400 steps/mm` and the 2 mm lead assumption under real load.
 
 ### BME688 Address
 
@@ -178,19 +190,19 @@ Risk register for firmware/hardware bring-up. These are not confirmed bugs.
 
 ### Blocking Calls / Motion Smoothness
 
-**Status:** sensor-side blocking mostly fixed; flow and motor pulse generation remain watch items.
+**Status:** sensor-side blocking mostly fixed; motor pulse timing moved to MCPWM; flow blocking remains a watch item.
 
-**Risk:** sensor/flow libraries may block; `AccelStepper` needs frequent service calls.
+**Risk:** sensor/flow libraries may still block their own tasks. MCPWM pulse generation no longer depends on how frequently `motorTask` runs, but calibration, software limits, acceleration updates, and watchdog handling still do.
 
-**Watch for:** motor stutter, command lag, telemetry pauses.
+**Watch for:** command lag, delayed limit/stall response, telemetry pauses, incorrect MCPWM frequency, or disagreement between PCNT position and physical travel.
 
 **Verified/fixed:** sensor polling is split into fast I2C, BME688, and thermocouple tasks; I2C/SPI bus access is mutex-protected; BME688 uses async start/finish so its gas-heater wait does not hold the I2C bus; MAX31856 uses continuous conversion mode.
 
 **Remaining behavior:** a Flow 1 timeout can still delay Flow 2 in `flowTask`.
 
-**Current note:** `motorTask` uses `delayMicroseconds(200)` instead of `vTaskDelay()` so `AccelStepper` is serviced more often than the FreeRTOS tick. This improves step timing but can burn CPU.
+**Current note:** `motorTask` runs every 1 ms and updates the motion planner. ESP32-P4 MCPWM generates STEP pulses continuously in hardware, and PCNT counts commanded pulses. PCNT does not detect physically skipped motor steps.
 
-**Later:** shorten flow timeouts, consider separate flow tasks, use non-blocking flow reads if needed, and consider hardware timer/RMT step generation if motion smoothness becomes a problem.
+**Later:** shorten flow timeouts, consider separate flow tasks, use non-blocking flow reads if needed, and consider an independent hardware/timer cutoff because continuous MCPWM output can continue if the motor task or scheduler fails completely.
 
 ### JSON / Heap Use
 

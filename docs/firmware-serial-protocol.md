@@ -58,6 +58,7 @@ Expected response:
   "component": "motor",
   "status": "state",
   "enabled": false,
+  "step_generator_ready": true,
   "endstop_active": false,
   "velocity_mode": false,
   "calibration_active": false,
@@ -81,7 +82,7 @@ Expected responses:
 
 ```json
 {"type":"status","t_us":123456789,"component":"motor","status":"command_queued"}
-{"type":"status","t_us":123456999,"component":"motor","status":"enabled","enabled":true,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":0,"position_mm":0}
+{"type":"status","t_us":123456999,"component":"motor","status":"enabled","enabled":true,"step_generator_ready":true,"endstop_active":false,"velocity_mode":false,"calibration_active":false,"limits_valid":false,"min_limit_mm":0,"max_limit_mm":0,"position_steps":0,"position_mm":0}
 ```
 
 #### `motor.disable`
@@ -104,7 +105,7 @@ Fields:
 
 - `mm`: numeric absolute target position.
 
-This is not a relative move. Sending the same target twice will not move the stage the second time if the firmware already believes it is at that target. Negative targets are clamped to `0`.
+This command requires valid calibrated limits from a completed `motor.calibrate_axis` run. This is not a relative move. Sending the same target twice will not move the stage the second time if the firmware already believes it is at that target. Negative targets are clamped to `0`.
 
 #### `motor.velocity_mm_s`
 
@@ -122,7 +123,7 @@ Fields:
 
 - `mm_s`: signed numeric velocity. `0` stops velocity motion immediately and disarms the velocity watchdog.
 
-Positive and negative signs select opposite directions. If the endstop is active while moving negative, the firmware stops motion, exits velocity mode, and sets the current position to `0`.
+Positive and negative signs select opposite directions. Nonzero velocity commands require valid calibrated limits from a completed `motor.calibrate_axis` run. If the endstop is active while moving negative, the firmware stops motion, exits velocity mode, and sets the current position to `0`.
 
 Velocity commands are rejected while axis calibration is active:
 
@@ -194,7 +195,7 @@ Important response fields:
 
 #### `motor.stall_test`
 
-Starts a bounded constant-velocity move and arms the GPIO 50 DIAG rising-edge interrupt.
+Starts a bounded StallGuard move and arms the GPIO 50 DIAG rising-edge interrupt. The firmware switches the TMC2209 into its StallGuard profile, with StealthChop enabled, for the test. When the test ends or is cancelled, normal SpreadCycle motion is restored.
 
 ```json
 {"cmd":"motor.stall_test","mm_s":-1.0,"max_travel_mm":5.0}
@@ -219,23 +220,26 @@ All completion paths disarm the interrupt. The driver remains enabled to hold th
 
 Runs full axis calibration and enables calibrated software limits.
 
+Before this command completes, normal absolute target commands and nonzero velocity commands are rejected with `calibration_incomplete`.
+
 ```json
 {"cmd":"motor.calibrate_axis"}
 ```
 
 Optional field:
 
-- `max_travel_mm`: positive safety cap for each seek direction, no greater than `300 mm`. If omitted, firmware uses `300 mm`.
+- `max_travel_mm`: positive safety cap for each seek direction, no greater than `210 mm`. If omitted, firmware uses `210 mm`.
 
 The motor must already be enabled and idle, and DIAG must be low. The sequence:
 
-1. Seeks negative at `20 mm/s` until StallGuard DIAG or the physical endstop triggers.
+1. Seeks negative at `10 mm/s` until StallGuard DIAG or the physical endstop triggers.
 2. Backs off positive by `2 mm`.
 3. Sets that backed-off point to logical `0 mm`.
-4. Seeks positive at `20 mm/s` until StallGuard DIAG or the physical endstop triggers.
+4. Seeks positive at `10 mm/s` until StallGuard DIAG or the physical endstop triggers.
 5. Backs off negative by `2 mm`.
 6. Stores that backed-off point as `max_limit_mm`.
-7. Moves to the center of the calibrated range.
+7. Moves to the center of the calibrated range at the calibration speed cap.
+8. Waits briefly, restores the normal SpreadCycle profile, and reports completion.
 
 Expected status values include:
 
@@ -638,12 +642,14 @@ The host should wait for `ready` or `ready_with_warnings` before sending normal 
 - For motor moves, host software should request `motor.status` after sending motion commands if it needs the current firmware position.
 - `motor.target_mm` is an absolute command.
 - `motor.velocity_mm_s` uses a latest-wins mailbox and a `2000 ms` watchdog rather than the normal FIFO command queue.
+- Normal target and nonzero velocity commands require successful axis calibration first.
 - The motor driver is intentionally disabled after boot. The host must send `motor.enable` before motion.
 - Negative absolute motor targets are clamped to `0`.
 - After `motor.calibrate_axis` succeeds, absolute targets are clamped to the calibrated range and velocity motion stops at calibrated software limits.
 - `motor.stop` is a controlled stop, not an emergency power cutoff.
 - TMC2209 bidirectional UART readback is required for driver and StallGuard diagnostics.
-- TMC2209 StallGuard4 is configured for StealthChop and starts with the tuned defaults `SGTHRS=158` and `TCOOLTHRS=1500`. DIAG is ignored during ordinary movement unless a bounded test or axis calibration explicitly arms it.
+- Normal target and velocity motion use the normal TMC2209 profile with SpreadCycle enabled.
+- TMC2209 StallGuard4 test/calibration motion uses the StallGuard profile with StealthChop enabled and starts with the tuned defaults `SGTHRS=160` and `TCOOLTHRS=1500`. DIAG is ignored during ordinary movement unless a bounded test or axis calibration explicitly arms it.
 - GPIO 50 is the TMC2209 DIAG input. It is captured with a rising-edge interrupt only while StallGuard motion is active.
 
 ## StallGuard4 Bring-Up Procedure
@@ -664,7 +670,7 @@ The host should wait for `ready` or `ready_with_warnings` before sending normal 
    {"cmd":"motor.stall_status"}
    ```
 
-   Expect `diag_gpio: 50`, `diag_pin: false`, `stall_guard_armed: false`, `sg_threshold: 158`, and `tcoolthrs: 1500`.
+   Expect `diag_gpio: 50`, `diag_pin: false`, `stall_guard_armed: false`, `sg_threshold: 160`, and `tcoolthrs: 1500`.
 
 4. Choose a fixed calibration velocity. With the configured 2 mm lead screw, `1 mm/s` equals one motor revolution every two seconds and is a reasonable initial value.
 5. Move at the calibration velocity and request `motor.stall_status` repeatedly while applying a controlled, gradually increasing mechanical load. Record the lowest `SG_RESULT` before a stall, then stop the motor.

@@ -30,8 +30,8 @@ export const DEFAULT_CONFIG = {
     mmPerPx: 0.05,
     imageVelocityAlpha: 0.35,
     // Keep this aligned with firmware Config::kMaxStageAccelMmS2.
-    motorAccelerationMmS2: 100.0,
-    maxVelocityMmS: 40.0,
+    motorAccelerationMmS2: 40.0,
+    maxVelocityMmS: 25.0,
     controlSign: -1,
     processFps: 12,
     autoControlHz: 10,

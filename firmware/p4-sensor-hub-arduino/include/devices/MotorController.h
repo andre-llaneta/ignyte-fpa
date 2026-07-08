@@ -1,9 +1,10 @@
 #pragma once
 
-#include <AccelStepper.h>
 #include <Arduino.h>
 #include <TMCStepper.h>
 #include <freertos/semphr.h>
+
+#include "devices/HardwareStepGenerator.h"
 
 struct TmcDriverDiagnostics {
   uint8_t connection_result = 0;
@@ -59,6 +60,7 @@ class MotorController {
   float positionMm();
   bool endstopActive() const;
   bool enabled() const;
+  bool stepGeneratorReady() const;
   bool velocityMode() const;
   bool calibrationActive() const;
   bool limitsValid() const;
@@ -76,10 +78,16 @@ class MotorController {
  private:
   static void IRAM_ATTR handleDiagInterrupt();
   void armStallGuard();
+  void requestStallGuardArm();
+  void armStallGuardIfReady();
   void disarmStallGuard();
   void cancelStallMotion();
   void moveToSteps(long steps);
+  void startPositionMove(long targetSteps);
+  void startRampedVelocity(float velocityMmS);
   void setStallGuardThreshold(uint8_t threshold);
+  void applyNormalDriverProfile();
+  void applyStallGuardDriverProfile();
   void cancelAxisCalibration();
   bool serviceAxisCalibration();
   bool seekMaxDiagPending();
@@ -88,7 +96,10 @@ class MotorController {
   bool enforceSoftwareLimits();
   long clampToSoftwareLimits(long steps);
   void serviceVelocityRamp();
+  void servicePositionMove();
+  void applyRampedVelocity(float desiredVelocityMmS);
   void stopImmediately();
+  bool motionActive() const;
   void lockDriver();
   void unlockDriver();
 
@@ -109,15 +120,25 @@ class MotorController {
     MoveCenter,
   };
 
+  enum class DriverMotionProfile {
+    Normal,
+    StallGuard,
+  };
+
   HardwareSerial& serial_;
   TMC2209Stepper driver_;
-  AccelStepper stepper_;
+  HardwareStepGenerator stepGenerator_;
   SemaphoreHandle_t driverMutex_ = nullptr;
   bool velocityMode_ = false;
+  bool positionMoveActive_ = false;
+  int8_t positionMoveDirection_ = 0;
+  long targetPositionSteps_ = 0;
   float targetVelocityMmS_ = 0.0f;
   float appliedVelocityMmS_ = 0.0f;
   uint32_t lastVelocityRampUs_ = 0;
   bool enabled_ = false;
+  bool stallGuardArmPending_ = false;
+  DriverMotionProfile driverMotionProfile_ = DriverMotionProfile::Normal;
   StallMotionMode stallMotionMode_ = StallMotionMode::None;
   AxisCalibrationMode calibrationMode_ = AxisCalibrationMode::None;
   long stallTestStartSteps_ = 0;

@@ -52,7 +52,7 @@ The normal firmware creates all sensor and flow polling tasks in `setup()`. Duri
 
 Current task roles:
 
-- `motorTask`, priority 5: calls `motor.service()` frequently so STEP/DIR motion is not blocked by sensor or flow operations.
+- `motorTask`, priority 5: updates motion planning, calibration, limits, and watchdog state every 1 ms. MCPWM generates STEP pulses independently between updates.
 - `commandTask`, priority 3: reads newline-delimited JSON commands from USB serial. Motor commands are validated and queued for `motorTask` instead of directly mutating motor state.
 - `fastI2cSensorTask`, priority 2: polls short I2C reads for SHT45 and SEN0496.
 - `bmeSensorTask`, priority 2: runs BME688 gas measurements as an async start/finish cycle so the heater wait does not hold the I2C bus.
@@ -60,7 +60,7 @@ Current task roles:
 - `flowTask`, priority 2: polls both Bronkhorst controllers periodically.
 - `loop()`: idle delay only.
 
-Motor ownership: `motorTask` owns `MotorController`. `commandTask` sends motor requests through a FreeRTOS queue with depth 8. This avoids simultaneous access to `AccelStepper` from multiple tasks.
+Motor ownership: `motorTask` owns `MotorController`. `commandTask` sends motor requests through a FreeRTOS queue with depth 8. This prevents simultaneous motion-state updates while MCPWM and PCNT handle pulse generation and counting in hardware.
 I2C access is protected by an I2C bus mutex because `fastI2cSensorTask`, `bmeSensorTask`, and `i2c.scan` all use `Wire`. SPI thermocouple access is protected by a separate SPI mutex.
 
 ## Pin Map
@@ -144,7 +144,6 @@ The current PlatformIO project uses libraries:
 
 - `ArduinoJson`: JSON command parsing and telemetry output
 - `TMCStepper`: TMC2209 UART configuration/status
-- `AccelStepper`: STEP/DIR motion timing
 - `Adafruit MAX31856 library`: thermocouple reads
 - `Adafruit SHT4x Library`: SHT45 reads
 - `Adafruit BME680 Library`: BME688 reads
@@ -293,15 +292,17 @@ The vertical camera stage is driven by a stepper motor through a TMC2209.
 Current design:
 
 - `TMCStepper` configures the TMC2209 over UART.
-- `AccelStepper` generates STEP/DIR pulses in software.
+- ESP32-P4 MCPWM generates STEP pulses at the requested hardware-timed frequency.
+- ESP32-P4 PCNT counts STEP edges and uses DIR as the count direction.
 - `IoExpander` sets the TMC2209 MS1/MS2 pins through an MCP23017 before motor setup.
-- `MotorController` wraps both libraries and exposes apparatus-specific commands.
+- `HardwareStepGenerator` owns MCPWM, DIR output, and PCNT.
+- `MotorController` owns acceleration, finite-position planning, calibration, limits, and apparatus-specific commands.
 
 This separation matters:
 
 - `TMCStepper` talks to the driver chip and sets things like current and microstepping.
-- `AccelStepper` calculates step timing and toggles `STEP`/`DIR`.
-- `MotorController` knows project-specific rules like no negative position and millimeter-to-step conversion.
+- `HardwareStepGenerator` converts steps/second into an MCPWM period and reports the pulse count from PCNT.
+- `MotorController` converts millimeters to steps and calculates velocity from target position, acceleration, and stopping distance.
 
 Current mechanical assumptions:
 
@@ -309,17 +310,15 @@ Current mechanical assumptions:
 | --- | ---: |
 | Motor full steps/rev | 200 |
 | Lead screw | 2 mm/rev |
-| Microsteps | 8 |
-| Steps/mm | 800 |
-| Max speed | 40 mm/s |
-| Max acceleration | 100 mm/s^2 |
-| StallGuard threshold | SGTHRS 150 |
+| Microsteps | 4 |
+| Steps/mm | 400 |
+| Max speed | 25 mm/s |
+| Max acceleration | 40 mm/s^2 |
+| StallGuard threshold | SGTHRS 160 |
 | StallGuard cool threshold | TCOOLTHRS 1500 |
-| Stall homing speed | -20 mm/s |
-| Stall homing backoff | 2 mm |
-| Axis calibration speed | 20 mm/s |
-| Axis calibration max travel | 300 mm |
-| Motor current | 600 mA RMS |
+| Axis calibration speed | 10 mm/s |
+| Axis calibration max travel | 210 mm |
+| Motor current | 900 mA RMS |
 | Motor direction inverted | true |
 
 MS1/MS2 are also connected to an MCP23017 on the I2C bus. Current mapping:
@@ -329,13 +328,13 @@ MS1/MS2 are also connected to an MCP23017 on the I2C bus. Current mapping:
 | MS2 | GPA0 / A0 |
 | MS1 | GPA1 / A1 |
 
-The MCP23017 address is currently `0x20`, configurable by jumper pads and stored in `Addresses::kMcp23017`. At boot, firmware sets MS1/MS2 from `Config::kMicrosteps`; for the current `8` microstep setting, MS1 is driven high and MS2 is driven low. The firmware also configures microsteps over TMC2209 UART so the physical pins and UART setting should agree.
+The MCP23017 address is currently `0x20`, configurable by jumper pads and stored in `Addresses::kMcp23017`. The current `4`-microstep setting is selected through the TMC2209 UART with `mstep_reg_select(true)`. The existing MCP23017 pin helper only maps the standalone-driver choices `8`, `16`, `32`, and `64`, so it cannot represent the current setting and reports `motor_microsteps_invalid` during boot. The UART readback from `motor.driver_status` is the authoritative check after configuration.
 
 The motor driver and motor power supply must be on before the ESP32-P4 boots. If the TMC2209 is unpowered during initial firmware configuration, it can miss the UART microstep command and remain at a different driver setting than the firmware expects. Any mismatch between `Config::kMicrosteps` and `motor.driver_status` microstep readback changes the real millimeters-per-step scale, so after boot use `motor.driver_status` and confirm the reported `microsteps` matches `Config::kMicrosteps`.
 
 The expected stage is a vertical FUYU-style NEMA14 screw stage with a 2 mm lead. The endstop is currently assumed to be a bottom/home switch, so home is position `0 mm` and upward travel is positive.
 
-The TMC2209 is configured for StealthChop and StallGuard4. DIAG is wired to GPIO50 and is captured with a rising-edge interrupt only during bounded StallGuard test/homing moves. The ISR only latches the event; `motorTask` performs the stop and reports completion.
+The TMC2209 uses two firmware-selected driver profiles. Normal target and velocity motion uses SpreadCycle for better high-speed stability. StallGuard test and axis calibration use StealthChop because StallGuard4 depends on that operating window. DIAG is wired to GPIO50 and is captured with a rising-edge interrupt only during bounded StallGuard test/calibration moves. The ISR only latches the event; `motorTask` performs the stop and reports completion.
 
 Current motor commands:
 
@@ -348,7 +347,7 @@ Current motor commands:
 {"cmd":"motor.stop"}
 {"cmd":"motor.home_here"}
 {"cmd":"motor.driver_status"}
-{"cmd":"motor.stall_config","sgthrs":150,"tcoolthrs":1500}
+{"cmd":"motor.stall_config","sgthrs":160,"tcoolthrs":1500}
 {"cmd":"motor.stall_status"}
 {"cmd":"motor.stall_test","mm_s":-2.0,"max_travel_mm":5.0}
 {"cmd":"motor.calibrate_axis"}
@@ -356,9 +355,11 @@ Current motor commands:
 
 Most motor commands are placed into a FreeRTOS queue and applied by `motorTask`. The current queue depth is 8. `motor.velocity_mm_s` is the exception: it uses a one-slot latest-wins mailbox plus a `2000 ms` watchdog so camera-control velocity commands do not build up stale motion.
 
-`motor.calibrate_axis` runs a full two-ended calibration sequence. It seeks the negative end using StallGuard DIAG or the physical endstop, backs off one lead-screw revolution, sets that point to `0 mm`, seeks the positive end, backs off, stores `max_limit_mm`, enables software limits, and moves to the calibrated center. After calibration, absolute targets are clamped to the calibrated range and velocity motion stops at either software limit.
+Motor state messages include `step_generator_ready`. It must be `true` before enable or motion commands can succeed; `false` indicates MCPWM or PCNT initialization failed during boot.
 
-`motor.stall_status` and `motor.driver_status` perform TMC UART reads outside the motor pulse-generation task so repeated diagnostics do not block step servicing. A healthy TMC UART should report `connection_ok:true`; if it reports false, StallGuard configuration/readback should not be trusted. For motion scale validation, `motor.driver_status` should report the same `microsteps` value as `Config::kMicrosteps`.
+`motor.calibrate_axis` runs a full two-ended calibration sequence. It switches into the StallGuard/StealthChop profile, accelerates into each seek using the configured stage acceleration, seeks the negative end using StallGuard DIAG or the physical endstop, backs off one lead-screw revolution, sets that point to `0 mm`, seeks the positive end, backs off, stores `max_limit_mm`, enables software limits, and moves to the calibrated center at the calibration velocity cap. StallGuard DIAG capture is armed only after MCPWM reaches the lower of the requested seek velocity or `kStallGuardArmVelocityMmS`; the physical endstop remains active throughout ramp-up. After the center move completes, firmware waits briefly, restores the normal SpreadCycle profile, and reports calibration completion. Before calibration succeeds, normal absolute target commands and nonzero velocity commands are rejected with `calibration_incomplete`. After calibration, absolute targets are clamped to the calibrated range and velocity motion stops at either software limit.
+
+`motor.stall_status` and `motor.driver_status` perform TMC UART reads outside the motor task. MCPWM continues generating STEP pulses while those reads occur. A healthy TMC UART should report `connection_ok:true`; if it reports false, StallGuard configuration/readback should not be trusted. For motion scale validation, `motor.driver_status` should report the same `microsteps` value as `Config::kMicrosteps`.
 
 Important safety assumptions:
 
@@ -373,7 +374,8 @@ Important follow-up:
 - verify current limit before connecting the real motor
 - add proper header pins / a dedicated connector for the physical endstop in the next hardware revision
 - add a proper TMC2209 UART RX route through a 1 kOhm series resistor in the next hardware revision
-- consider timer/RMT-based step generation if `AccelStepper` is not smooth enough at desired speeds
+- validate MCPWM frequency, PCNT position, finite target moves, and immediate-stop latency on hardware
+- consider an independent hardware or timer-backed motion cutoff for a total motor-task/scheduler failure
 - after hardware bring-up, refactor `main.cpp` so command parsing and telemetry publishers live outside the task/orchestration file
 
 ## Bronkhorst Flow Controller Design
@@ -476,7 +478,7 @@ The code builds successfully, but these hardware/runtime assumptions still need 
 - TMC2209 driver and motor supply are powered before boot/configuration so UART setup commands are actually received.
 - TMC2209 driver address is `0b00`.
 - TMC2209 sense resistor is `0.05 ohm`.
-- 600 mA RMS current is appropriate for the selected NEMA14 motor.
+- 900 mA RMS current is appropriate for the selected NEMA14 motor and driver thermals.
 - MAX31856 thermocouples are type K.
 - BME688 address is `0x77`; verify whether it should be `0x76`.
 - SEN0496 address is `0x70`; verify whether its DIP switch selects `0x71`-`0x73`.
@@ -497,14 +499,14 @@ Recommended order:
 6. For a future D6F-capable hardware revision, check D6F raw ADC and voltage against a multimeter.
 7. Power the motor driver/motor supply before boot, then test TMC2209 UART communication before motor movement.
 8. Run `motor.driver_status` and confirm `connection_ok:true` and `microsteps` matches `Config::kMicrosteps`.
-9. Test motor enable and small `motor.target_mm` movement at low current.
-10. Verify direction polarity.
+9. Test motor enable and verify TMC diagnostics without moving.
+10. Verify direction polarity with bounded StallGuard/calibration motion only.
 11. Verify endstop polarity and StallGuard detection behavior.
 12. Test one Bronkhorst channel with read-measure only.
 13. Test Bronkhorst setpoint write at low/safe flow.
 14. Add a laptop logger that records JSONL with laptop receive timestamps.
 15. Add command IDs and stricter error reporting.
-16. Run `motor.calibrate_axis` and validate calibrated software limits before closed-loop camera tracking.
+16. Run `motor.calibrate_axis`, validate calibrated software limits, then test small `motor.target_mm` and `motor.velocity_mm_s` moves before closed-loop camera tracking.
 17. Add safety limits for flow range and a true emergency-stop path.
 
 ## Firmware Build Command

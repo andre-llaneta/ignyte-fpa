@@ -217,6 +217,7 @@ void publishMotorState(const char* status) {
   doc["component"] = "motor";
   doc["status"] = status;
   doc["enabled"] = motor.enabled();
+  doc["step_generator_ready"] = motor.stepGeneratorReady();
   doc["endstop_active"] = motor.endstopActive();
   doc["velocity_mode"] = motor.velocityMode();
   doc["calibration_active"] = motor.calibrationActive();
@@ -649,7 +650,6 @@ void checkMotorVelocityWatchdog() {
 void motorTask(void*) {
   MotorCommand command;
   MotorVelocityCommand velocityCommand;
-  uint8_t yieldCounter = 0;
 
   for (;;) {
     if (motorCommandQueue != nullptr) {
@@ -666,11 +666,7 @@ void motorTask(void*) {
     checkMotorVelocityWatchdog();
     motor.service();
     publishMotorMotionEvent(motor.takeMotionEvent());
-    delayMicroseconds(20);
-    if (++yieldCounter >= 10) {
-      yieldCounter = 0;
-      vTaskDelay(pdMS_TO_TICKS(1));
-    }
+    vTaskDelay(pdMS_TO_TICKS(Config::kMotorServicePeriodMs));
   }
 }
 
