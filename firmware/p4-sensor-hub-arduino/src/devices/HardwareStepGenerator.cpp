@@ -21,6 +21,9 @@ bool HardwareStepGenerator::begin() {
   pinMode(Pins::kMotorDir, OUTPUT);
   digitalWrite(Pins::kMotorDir, Config::kMotorDirectionInverted ? HIGH : LOW);
 
+  // MCPWM generates STEP pulses in hardware so motor speed is not limited by a
+  // software loop calling step(). PCNT counts commanded pulses, not guaranteed
+  // physical motor movement.
   if (!configurePwm() || !configurePulseCounter()) {
     stopImmediately();
     return false;

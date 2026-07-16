@@ -19,27 +19,25 @@ This repository focuses on the apparatus-side system: sensor acquisition, motori
 ```text
 IgNYte-FPA/
   firmware/
-    p4-sensor-hub-arduino/   Active ESP32-P4 PlatformIO firmware
-    p4-sensor-hub/           Older ESP-IDF skeleton kept for reference
+    p4-sensor-hub-arduino/        Active ESP32-P4 PlatformIO firmware
+    p4-sensor-hub/                Older ESP-IDF skeleton kept for reference
   hardware/
-    motherV1/                KiCad board files and JLCPCB manufacturing exports
-    README.md                Board overview and validation summary
-    errata.md                Known board issues and next-revision notes
+    motherV1/                     KiCad board files and JLCPCB manufacturing exports
+    README.md                     Board overview and validation summary
+    errata.md                     Known board issues and next-revision notes
   software/
-    camera/                  OpenCV.js flame-tracking prototype
-    flow-controller/         Flow-controller software notes/placeholders
-    host-control/            Host-control software notes/placeholders
+    camera/                       OpenCV.js flame-tracking prototype
+    flow-controller/              Flow-controller software notes/placeholders
   tools/
-    tmc_stall_sweep.py       Motor/StallGuard tuning helper script
+    tmc_stall_sweep.py            Motor/StallGuard tuning helper script
   docs/
-    project-context.md       Current architecture and design context
-    firmware-serial-protocol.md
-                             JSONL command, telemetry, and quick-reference protocol
-    final-validation.md      Final validation checklist and observed results
-    possible-issues.md       Open risks and follow-up items
-    change-log.md            Confirmed fixes and design changes
+    project-context.md            Current architecture and design context
+    firmware-serial-protocol.md   JSONL command, telemetry, and quick-reference protocol
+    final-validation.md           Final validation checklist and observed results
+    possible-issues.md            Open risks and follow-up items
+    change-log.md                 Confirmed fixes and design changes
   .github/workflows/
-    firmware-opencv.yml      Firmware and OpenCV prototype CI checks
+    firmware-opencv.yml           Firmware and OpenCV prototype CI checks
 ```
 
 ## System Scope
@@ -136,7 +134,8 @@ The current board revision is `motherV1`, a fabricated and tested breakout/inter
 - TMC2209 motor driver
 - MAX31856 thermocouple interfaces
 - I2C sensors
-- Analog sensor support
+- Analog sensors
+- SPI sensors
 - RS232 flow-controller interfaces
 - MCP23017 I/O expansion
 - Power distribution and buck converters

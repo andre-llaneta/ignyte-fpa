@@ -51,11 +51,15 @@ void MotorController::configureDriver() {
   lockDriver();
   driver_.begin();
   driver_.pdn_disable(true);
+  // Microsteps are selected through the TMC2209 UART register because this
+  // firmware uses 4 microsteps and the MCP23017 MS1/MS2 helper only represents
+  // standalone 8/16/32/64 modes.
   driver_.mstep_reg_select(true);
   driver_.I_scale_analog(false);
   driver_.rms_current(kMotorCurrentMa, 0.25f);  // 0.25f is the multiplier for hold current
   driver_.microsteps(Config::kMicrosteps);
-  // SpreadCycle settings (change if needed for noise or vibration issues)
+  // Normal target and velocity motion use SpreadCycle because it was more
+  // stable at higher stage speeds than StealthChop during bring-up.
   driver_.toff(5);                              // spreadcycle settings - recirculation time
 //driver_.tbl(2);                               // spreadcycle settings - measurement "blank time"
 //driver_.hend(4);                              // spreadcycle settings - basic hysteresis value
@@ -305,6 +309,8 @@ bool MotorController::startAxisCalibration(float maxTravelMm) {
   }
 
   stopImmediately();
+  // Calibration re-runs driver configuration so a missed boot-time UART write
+  // can be recovered before calibrated limits are measured.
   configureDriver();
   applyStallGuardDriverProfile();
   limitsValid_ = false;
@@ -464,6 +470,8 @@ void MotorController::applyStallGuardDriverProfile() {
     return;
   }
 
+  // StallGuard calibration/test motion uses StealthChop because this TMC2209
+  // StallGuard4 path depends on the StealthChop operating window.
   lockDriver();
   driver_.en_spreadCycle(false);
   driverMotionProfile_ = DriverMotionProfile::StallGuard;
@@ -522,6 +530,8 @@ bool MotorController::serviceAxisCalibration() {
     calibrationMode_ = AxisCalibrationMode::SeekMax;
     setStallGuardThreshold(Config::kAxisCalibrationSeekMaxSgthrs);
     startRampedVelocity(fabsf(Config::kAxisCalibrationVelocityMmS));
+    // DIAG can remain latched after the min-side stall. Ignore it briefly
+    // before arming max seek so calibration does not end on a stale event.
     calibrationSeekMaxDiagIgnoreUntilMs_ =
         millis() + Config::kAxisCalibrationSeekMaxDiagIgnoreMs;
     motionEvent_ = MotorMotionEvent::AxisCalibrationMinSet;

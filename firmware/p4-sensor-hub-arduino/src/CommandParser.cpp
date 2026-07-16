@@ -8,6 +8,8 @@
 #include <cstring>
 
 namespace {
+// Parsed commands outlive the ArduinoJson document, so string fields are copied
+// into fixed storage instead of storing pointers into the JSON buffer.
 void copyText(char* destination, size_t destinationSize, const char* source) {
   if (destinationSize == 0) {
     return;

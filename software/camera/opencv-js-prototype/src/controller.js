@@ -170,6 +170,9 @@ function computeFeedforward(imageVelocityPxS, estimatedAppliedMmS, options) {
     }
   }
 
+  // Correct measured image velocity by estimated camera velocity. When tracking
+  // works well, the flame can look stationary in-frame while still moving along
+  // the sample.
   const cameraVelocityPxS =
     estimatedAppliedMmS / (options.controlSign * options.mmPerPx)
   const estimatedFlameVelocityPxS = imageVelocityPxS + cameraVelocityPxS

@@ -533,6 +533,8 @@ void bmeSensorTask(void*) {
     if (sensorOnline[kBmeSensorIndex]) {
       const uint64_t timestampUs = nowUs();
       if (!bme688.asyncReadingActive() && bme688.due(timestampUs)) {
+        // BME688 gas reads include a heater wait. Keep that wait in its own
+        // task so fast I2C polling can continue for SHT45 and oxygen.
         if (i2cBusMutex != nullptr) {
           xSemaphoreTake(i2cBusMutex, portMAX_DELAY);
         }

@@ -42,6 +42,9 @@ export function detectTarget(cv, sourceCanvas, options) {
   try {
     cv.cvtColor(src, rgb, cv.COLOR_RGBA2RGB)
     cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV)
+    // Use two masks because flames can contain both washed-out bright regions
+    // and saturated orange/yellow regions. Combining them follows the whole
+    // flame body instead of only the internal highlight.
     cv.inRange(hsv, brightLow, brightHigh, brightMask)
     cv.inRange(hsv, coloredLow, coloredHigh, coloredMask)
     cv.bitwise_or(brightMask, coloredMask, mask)
