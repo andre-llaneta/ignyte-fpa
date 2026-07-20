@@ -164,6 +164,8 @@ Use this order when bringing up the full apparatus from a cold start:
 11. Start camera tracking and verify the mask, contour, bottom point, and command sign are correct.
 12. Enable auto control only after the stage is clear, calibrated, and moving in the expected direction.
 
+For the full demo checklist, use [docs/operator-demo-flow.md](docs/operator-demo-flow.md).
+
 ## Camera / OpenCV Prototype
 
 The standalone OpenCV.js prototype lives at:

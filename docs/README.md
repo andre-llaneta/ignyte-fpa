@@ -10,6 +10,7 @@ Project documentation for the IgNYte-FPA system.
 
 Current contents:
 
+- `operator-demo-flow.md`: clean-boot operator checklist for demo and handoff.
 - `final-validation.md`: final handoff/demo validation checklist and observed validation results.
 - `project-context.md`: current system architecture, firmware layout, pin maps, motor assumptions, CI status, and bring-up notes.
 - `firmware-serial-protocol.md`: newline-delimited JSON serial protocol reference, including the operator quick command reference.
