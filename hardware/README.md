@@ -13,18 +13,36 @@ Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 The board is intended to reduce loose wiring during apparatus bring-up by collecting the major support electronics on one PCB:
 
 - DFRobot FireBeetle 2 ESP32-P4 controller interface
-- TMC2209 stepper motor driver interface
-- MCP23017 I/O expander
-- 4 MAX31856 thermocouple interfaces
-- SHT45, BME688, and SEN0496 I2C sensor interfaces
+- Adafruit TMC2209 stepper motor driver interface
+- Adafruit MCP23017 I/O expander
+- 4 Adafruit MAX31856 thermocouple interfaces
+- Adafruit SHT45, Adafruit BME688, and DFRobot SEN0496 I2C sensor interfaces
 - SPI and analog sensor expansion
-- D6F analog flow sensor support
-- Flow controller UART interfaces
+- Omron D6F analog flow sensor support
+- Adafruit RS232 Pal interfaces for flow-controller UART level shifting
 - Motor DIAG, INDEX, and endstop-related signals
 - USB-C power input
 - MPM3610 buck converter
 - TPS62827 buck converter
 - Power distribution for the sensor hub peripherals
+
+## External Boards And Modules
+
+The current board was designed around these external boards/modules and sensor breakouts. Verify exact part numbers against the BOM and physical hardware before ordering replacements.
+
+| Function | Part / module | Link |
+| --- | --- | --- |
+| Main MCU | DFRobot FireBeetle 2 ESP32-P4 AI Vision Board | [DFRobot product page](https://www.dfrobot.com/product-2915.html) / [DFRobot wiki](https://wiki.dfrobot.com/dfr1172/) |
+| Stepper driver | Adafruit TMC2209 Stepper Motor Driver Breakout Board | [Adafruit product 6121](https://www.adafruit.com/product/6121) |
+| Thermocouple interface | Adafruit Universal Thermocouple Amplifier MAX31856 Breakout | [Adafruit product 3263](https://www.adafruit.com/product/3263) |
+| Temperature/RH | Adafruit Sensirion SHT45 Precision Temperature & Humidity Sensor | [Adafruit product 5665](https://www.adafruit.com/product/5665) |
+| Environment / gas | Adafruit BME688 Temperature, Humidity, Pressure and Gas Sensor | [Adafruit product 5046](https://www.adafruit.com/product/5046) |
+| Oxygen | DFRobot Gravity SEN0496 Electrochemical Oxygen / O2 Sensor | [DFRobot product page](https://www.dfrobot.com/product-2569.html) / [DFRobot wiki](https://wiki.dfrobot.com/sen0496/) |
+| I/O expansion | Adafruit MCP23017 I2C GPIO Expander Breakout | [Adafruit product 5346](https://www.adafruit.com/product/5346) |
+| RS232 level shifting | Adafruit RS232 Pal MAX3232E | [Adafruit product 5987](https://www.adafruit.com/product/5987) |
+| 5 V buck converter | Adafruit MPM3610 5V Buck Converter Breakout | [Adafruit product 4739](https://www.adafruit.com/product/4739) |
+| 3.3 V buck converter IC | Texas Instruments TPS62827 | [TI product page](https://www.ti.com/product/TPS62827) |
+| Analog flow velocity sensor | Omron D6F series / D6F-V03A1 | [Omron D6F series](https://components.omron.com/us-en/products/sensors/D6F) |
 
 ## Directory Layout
 
@@ -75,6 +93,19 @@ See [errata.md](./errata.md) for confirmed hardware issues and next-revision rec
 | TMC2209 | Validated with bodge | UART/status/motion |
 | Endstop | Works, needs connector | Errata |
 | Flow RS232 | Pending controllers | Planned test |
+
+## Thermocouple Channel Mapping
+
+The current firmware labels the four installed MAX31856 thermocouple channels by their chip-select GPIOs. The confirmed physical thermocouple order is:
+
+| Physical thermocouple order | Firmware sensor name | GPIO / CS |
+| ---: | --- | ---: |
+| 1 | `tc1` | 21 |
+| 2 | `tc2` | 36 |
+| 3 | `tc3` | 35 |
+| 4 | `tc4` | 20 |
+
+The remaining SPI chip-selects, GPIO `34` and GPIO `31`, are reserved for future offboard SPI devices.
 
 ## Known Errata Summary
 

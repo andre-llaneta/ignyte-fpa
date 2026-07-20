@@ -100,16 +100,16 @@ The board may later support more I2C devices, including via an I/O expander boar
 
 SPI chip-select pins:
 
-| Channel | GPIO |
-| --- | ---: |
-| CS | 21 |
-| CS | 20 |
-| CS | 36 |
-| CS | 35 |
-| CS | 34 |
-| CS | 31 |
+| Firmware sensor | Physical thermocouple order | GPIO / CS |
+| --- | ---: | ---: |
+| `tc1` | 1 | 21 |
+| `tc2` | 2 | 36 |
+| `tc3` | 3 | 35 |
+| `tc4` | 4 | 20 |
+| Reserved SPI CS | 5 | 34 |
+| Reserved SPI CS | 6 | 31 |
 
-First bring-up uses 4 MAX31856 thermocouple boards. The board has capacity for 2 offboard SPI sensors.
+First bring-up uses 4 MAX31856 thermocouple boards. The confirmed physical thermocouple order is GPIO `21, 36, 35, 20`, which maps to firmware sensors `tc1, tc2, tc3, tc4`. The board has capacity for 2 offboard SPI sensors.
 
 ### Analog
 

@@ -20,6 +20,23 @@ Why:
 Verification:
 ```
 
+## 2026-07-16 - Document Thermocouple Channel Order
+
+What changed:
+
+- Documented the confirmed physical thermocouple order as GPIO `21, 36, 35, 20`.
+- Added the corresponding firmware sensor mapping: `tc1`, `tc2`, `tc3`, and `tc4`.
+- Added a thermocouple identity check table to `docs/final-validation.md`.
+
+Why:
+
+The web app displays thermocouple samples by the firmware `sensor` field, so the physical connector order must be documented clearly to keep `tc1..tc4` consistent across runs.
+
+Verification:
+
+- Confirmed the source mapping in `firmware/p4-sensor-hub-arduino/include/AppConfig.h`.
+- Updated `docs/project-context.md`, `hardware/README.md`, and `docs/final-validation.md`.
+
 ## 2026-07-15 - Consolidate Serial Command Documentation
 
 What changed:
@@ -51,6 +68,23 @@ The project is approaching handoff, so the top-level docs need to help a new ope
 Verification:
 
 - Cross-checked updated values against `firmware/p4-sensor-hub-arduino/include/AppConfig.h`, `MotorController.cpp`, and the OpenCV prototype config.
+
+## 2026-07-16 - Refresh StallGuard Sweep Tool And Hardware References
+
+What changed:
+
+- Updated `tools/tmc_stall_sweep.py` to use the current bounded `motor.stall_test` protocol instead of the removed `motor.driver_configure` command and free-running `motor.velocity_mm_s` motion.
+- Added optional `motor.stall_config` support, direction selection, bounded travel, segment timeout handling, and per-segment `sg_result` summaries.
+- Added external board/module links to `hardware/README.md` for the FireBeetle 2 ESP32-P4, TMC2209, MAX31856, SHT45, BME688, SEN0496, MCP23017, RS232 Pal, MPM3610, TPS62827, and Omron D6F references.
+
+Why:
+
+The old sweep script no longer matched the current firmware command set, and the hardware README needed direct links for future replacement ordering and board-context review.
+
+Verification:
+
+- Ran Python syntax compilation on `tools/tmc_stall_sweep.py`.
+- Searched the updated tool for removed motor command names.
 
 ## 2026-07-08 - Tune Motor Driver Profiles And Calibration Speed
 

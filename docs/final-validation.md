@@ -126,6 +126,15 @@ Record status:
 | `bme688` | online | | 2 | |
 | `o2` | online | | 1 | |
 
+Confirm thermocouple channel identity:
+
+| Physical thermocouple order | Expected firmware sensor | GPIO / CS | Observed sensor | Pass? |
+| ---: | --- | ---: | --- | --- |
+| 1 | `tc1` | 21 | | |
+| 2 | `tc2` | 36 | | |
+| 3 | `tc3` | 35 | | |
+| 4 | `tc4` | 20 | | |
+
 Confirm live telemetry reaches the host/web app:
 
 | Signal | Pass? | Notes |
