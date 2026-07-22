@@ -1,5 +1,6 @@
 <!--
 Primary author: Will Andre Pasimio Llaneta (wpl5304)
+GitHub: https://github.com/andre-llaneta
 Project: IgNYte-FPA
 Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 -->
@@ -34,6 +35,28 @@ This is intentionally separate from the production `ignyte` web app for now. The
 - OpenCV/browser code may not be able to disable auto exposure, auto white balance, gain, or focus on the Brio 100. The page reports camera capabilities/settings and applies constraints only on a best-effort basis.
 - Processing is throttled below camera frame rate by default to reduce browser load.
 
+## Prerequisites
+
+- Chrome or Edge for webcam access and Web Serial support.
+- Python 3 to serve the static files from `localhost`.
+- Internet access the first time the page loads OpenCV.js from the CDN.
+- A webcam or browser-supported uploaded video file for tracking tests.
+- Optional: flashed ESP32-P4 firmware connected over USB for firmware command
+  testing.
+
+There is no `npm install` step and no `pip install` step for this prototype.
+The page is plain HTML/CSS/JavaScript. Python is only used to start a local
+static file server.
+
+OpenCV.js is loaded from:
+
+```html
+https://docs.opencv.org/4.x/opencv.js
+```
+
+If offline operation is needed, vendor `opencv.js` locally and update the
+script tag in `index.html`.
+
 ## What It Shows
 
 - Live webcam frame with overlay.
@@ -53,7 +76,8 @@ This is intentionally separate from the production `ignyte` web app for now. The
 
 ## Run
 
-Serve the folder from localhost. Camera access will not work reliably from a raw `file://` URL.
+Serve the folder from localhost. Camera access and Web Serial will not work
+reliably from a raw `file://` URL.
 
 ```powershell
 cd C:\Users\llane\OneDrive\Documents\GithubRepos\IgNYte-FPA\software\camera\opencv-js-prototype
@@ -65,6 +89,10 @@ Open Chrome or Edge:
 ```text
 http://localhost:8080
 ```
+
+Allow camera permission when prompted. For firmware control, connect the
+ESP32-P4 over USB, flash the firmware first, then use the page's serial connect
+control.
 
 ## First Test Target
 

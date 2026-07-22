@@ -1,5 +1,6 @@
 <!--
 Primary author: Will Andre Pasimio Llaneta (wpl5304)
+GitHub: https://github.com/andre-llaneta
 Project: IgNYte-FPA
 Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 -->
@@ -120,6 +121,7 @@ Refer to [errata.md](./errata.md) for the detailed impact and proposed fixes for
 
 ## Notes For Bring-Up
 
+- Before applying power, verify every socketed module and breakout board is seated in the correct header, correct orientation, and correct pin alignment. The board uses female headers for several modules, so it is possible to insert a module into the wrong position or offset it by one pin without noticing. A one-pin offset can connect supply voltage to the wrong module pin and permanently damage hardware.
 - Keep the motor driver and motor power available during firmware boot when testing motor configuration. If the driver is unpowered during initialization, configuration commands such as microstep setup may not take effect and the driver can remain at its default settings.
 - Treat the JLCPCB export folder as a snapshot of the current fabricated revision. Regenerate manufacturing files from KiCad before ordering a revised board.
 - Do not delete or ignore the errata when using this revision; several issues affect motor bring-up, wiring reliability, and next-board layout changes.

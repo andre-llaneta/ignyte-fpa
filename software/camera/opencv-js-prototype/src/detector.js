@@ -1,4 +1,5 @@
 // Primary author: Will Andre Pasimio Llaneta (wpl5304)
+// GitHub: https://github.com/andre-llaneta
 // Project: IgNYte-FPA
 // Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 
@@ -50,6 +51,7 @@ export function detectTarget(cv, sourceCanvas, options) {
     cv.bitwise_or(brightMask, coloredMask, mask)
     cv.morphologyEx(mask, cleaned, cv.MORPH_OPEN, kernel)
     cv.morphologyEx(cleaned, cleaned, cv.MORPH_CLOSE, kernel)
+    cv.medianBlur(cleaned, cleaned, kernelSize)
     cv.findContours(
       cleaned,
       contours,

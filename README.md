@@ -1,5 +1,6 @@
 <!--
 Primary author: Will Andre Pasimio Llaneta (wpl5304)
+GitHub: https://github.com/andre-llaneta
 Project: IgNYte-FPA
 Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 -->
@@ -28,7 +29,6 @@ IgNYte-FPA/
     errata.md                     Known board issues and next-revision notes
   software/
     camera/                       OpenCV.js flame-tracking prototype
-    flow-controller/              Flow-controller software notes/placeholders
   tools/
     tmc_stall_sweep.py            Motor/StallGuard tuning helper script
   docs/
@@ -179,7 +179,9 @@ YYYYMMDD-HHMMSS-PSETID-hsi.webm
 frames/
   YYYYMMDD-HHMMSS-Frame000001.jpg
   YYYYMMDD-HHMMSS-Frame000002.jpg
-  ...
+vision/
+  flame-tracking-overlay.webm
+  tracking-metrics.json
 ```
 
 The JSON stores run metadata, the frame list, and all sensor samples. Each
@@ -187,6 +189,13 @@ sample gets an `elapsedMs` timestamp from test start and an `associatedFrame`
 pointing to the nearest exported frame, including the frame number, filename,
 frame time, and time delta. This gives post-processing a direct telemetry to
 image alignment.
+
+Vision tracking metrics are saved in a separate `vision/` folder for analysis of
+the flame-tracking algorithm and motor-control behavior. The metrics log records
+the tracker state over time, including frame ID, elapsed time, tracking status,
+confidence, setpoint position, detected flame-bottom position, vertical error,
+recommended motor velocity, and processed FPS. The archive also includes a 
+flame-tracking overlay video.
 
 Current HSI support is browser-preview video/JPEG only. It is not native RAW
 hyperspectral datacube capture. A real Telops-style `.raw/.hdr`,
@@ -266,4 +275,5 @@ At the time of this README update:
 - Hardware-timed step generation has been added to reduce software step-generation bottlenecks.
 - The OpenCV.js flame tracker has been prototyped with dual flame masks and serial command output.
 - The IgNYte web app is expected to handle the production operator UI in the separate web app repository.
+- Final apparatus-level closed-loop tracking validation remains future work because the complete mechanical chamber/stage assembly was not available within the internship window.
 - Flow-controller testing remains dependent on flow-controller hardware availability.

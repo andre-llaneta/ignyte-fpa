@@ -1,5 +1,6 @@
 <!--
 Primary author: Will Andre Pasimio Llaneta (wpl5304)
+GitHub: https://github.com/andre-llaneta
 Project: IgNYte-FPA
 Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 -->
@@ -104,6 +105,22 @@ Verification:
 
 - Compared `docs/project-context.md` against the new firmware README and retained only current, actionable architecture details.
 - Left `docs/project-context.md` in place pending explicit deletion approval.
+
+## 2026-07-21 - Document Mechanical Validation Blocker
+
+What changed:
+
+- Added a final-validation section for quantitative closed-loop flame tracking metrics.
+- Documented that final apparatus-level closed-loop validation was partially blocked because the complete mechanical chamber/stage assembly was not available within the internship window.
+- Added future-work items for steady-state error, flame-front velocity, settling time, overshoot, lost-tracking recovery, weak-flame behavior, through-glass behavior, material/lighting sensitivity, and P/PI/feedforward comparison.
+
+Why:
+
+The flame tracker and control path were implemented, but the docs need to distinguish bench-level validation from final apparatus-level quantitative validation.
+
+Verification:
+
+- Added the blocker note to `docs/final-validation.md`, `docs/futurework.md`, and the root README current status.
 
 ## 2026-07-16 - Document Thermocouple Channel Order
 

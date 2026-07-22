@@ -1,5 +1,6 @@
 <!--
 Primary author: Will Andre Pasimio Llaneta (wpl5304)
+GitHub: https://github.com/andre-llaneta
 Project: IgNYte-FPA
 Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 -->
@@ -287,6 +288,8 @@ Mechanical sticking point:
 
 ## OpenCV / Web App Validation
 
+Final apparatus-level closed-loop validation was partially blocked because the full mechanical apparatus was not completed within the internship window. Firmware, hardware bring-up, web app integration, and camera-tracking tests should be evaluated against the available bench setup here; final through-chamber validation belongs in future work.
+
 Camera setup:
 
 | Item | Value |
@@ -344,6 +347,43 @@ Observed behavior:
 ```text
 
 ```
+
+## Closed-Loop Tracking Performance
+
+Use this section to record quantitative closed-loop flame tracking behavior once the complete mechanical chamber/stage assembly is available.
+
+Status: partially blocked at handoff by incomplete mechanical apparatus.
+
+| Test condition | Value / Notes |
+| --- | --- |
+| Chamber/glass present | |
+| Material tested | |
+| Flame brightness / condition | |
+| Controller mode | P / PI / PI + feedforward |
+| Kp / Ki / feedforward gain | |
+| Setpoint row / norm | |
+| Max motor velocity mm/s | |
+| Max motor acceleration mm/s^2 | |
+
+| Metric | Result | Notes |
+| --- | --- | --- |
+| Mean steady-state error px | | |
+| Max absolute tracking error px | | |
+| Maximum flame-front velocity followed | | |
+| Settling time after disturbance | | |
+| Overshoot | | |
+| Lost-tracking recovery time | | |
+| Weak-flame performance | pass / fail / partial / blocked | |
+| Through-glass performance | pass / fail / partial / blocked | |
+| Sensitivity across materials/lighting | | |
+
+Controller comparison:
+
+| Controller | Kp | Ki | Feedforward gain | Mean error | Max error | Overshoot | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| P | | | n/a | | | | |
+| PI | | | n/a | | | | |
+| PI + feedforward | | | | | | | |
 
 ## Data Logging Validation
 

@@ -1,5 +1,6 @@
 <!--
 Primary author: Will Andre Pasimio Llaneta (wpl5304)
+GitHub: https://github.com/andre-llaneta
 Project: IgNYte-FPA
 Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 -->
@@ -55,6 +56,8 @@ Key open question:
 
 The current motor stage works for the present camera setup, but a hyperspectral camera may be significantly heavier. If the stage struggles with the final camera payload, replace or upgrade the motor/stage assembly.
 
+Final apparatus-level motor and closed-loop tracking validation remains future work because the complete mechanical chamber/stage assembly was not available within the internship window.
+
 Recommended bring-up sequence for any replacement motor or stage:
 
 1. Confirm the motor driver powers correctly before ESP32-P4 boot.
@@ -64,15 +67,17 @@ Recommended bring-up sequence for any replacement motor or stage:
 5. Confirm `controlSign` in the web app using one-shot flame-tracking recommendations.
 6. Run bounded low-speed motion before higher-speed tests.
 7. Run axis calibration and confirm `limits_valid:true`.
-8. Test up/down motion separately at conservative speeds.
-9. Increase speed gradually while watching for skipped steps, binding, missed motion, or excessive noise/heat.
-10. Repeat the full OpenCV one-shot and auto-control demo flow only after manual motion is reliable.
+8. Retune StallGuard for the new motor/stage/load before trusting stall-based calibration.
+9. Test up/down motion separately at conservative speeds.
+10. Increase speed gradually while watching for skipped steps, binding, missed motion, or excessive noise/heat.
+11. Repeat the full OpenCV one-shot and auto-control demo flow only after manual motion is reliable.
 
 Notes:
 
 - Do not assume supplier headline speed applies to the assembled vertical camera stage.
 - A heavier camera changes load, cable drag, resonance, and required acceleration/current margins.
 - Earlier bring-up showed directional speed differences and a repeatable sticking point at the same physical travel location. If this returns with a heavier camera, inspect the rail/screw alignment, cable drag, backlash, and vertical load before raising current or forcing through the spot.
+- StallGuard thresholds are load- and motion-dependent. Use `tools/tmc_stall_sweep.py` to sweep candidate `SGTHRS` values with bounded travel before relying on `motor.calibrate_axis` for a changed camera payload, motor, driver current, microstep setting, or stage assembly.
 - If a replacement stage uses a different lead screw, microstep setting, or motor step angle, update firmware constants before trusting mm commands.
 
 ## IR Camera Flame-Front Sensing
@@ -90,6 +95,23 @@ Future work:
 Important caution:
 
 - Many long-wave IR thermal cameras do not see through ordinary glass well. Borosilicate glass transmission must be tested with the actual camera/wavelength range, not assumed from RGB camera behavior.
+
+## Final Closed-Loop Flame Tracking Validation
+
+The RGB OpenCV tracker and web app control path have been built and tested on the available setup, but final quantitative closed-loop performance should be measured on the completed apparatus.
+
+Future work:
+
+- Measure steady-state tracking error.
+- Measure maximum flame-front velocity successfully followed.
+- Measure settling time and overshoot after disturbances.
+- Validate lost-tracking recovery.
+- Test weak flames.
+- Test through the actual glass chamber.
+- Test sensitivity across materials and lighting conditions.
+- Compare P, PI, and feedforward control using the same material/chamber setup.
+
+Record results in `docs/final-validation.md`.
 
 ## True Emergency Stop
 

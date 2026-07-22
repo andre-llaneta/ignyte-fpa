@@ -1,5 +1,6 @@
 <!--
 Primary author: Will Andre Pasimio Llaneta (wpl5304)
+GitHub: https://github.com/andre-llaneta
 Project: IgNYte-FPA
 Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 -->
@@ -21,6 +22,12 @@ Use this as an operator checklist. Use `docs/final-validation.md` to record the 
 - Auto control is off.
 
 Important: if the TMC2209 is unpowered during firmware boot, driver configuration writes can be missed. Calibration reconfigures the driver again, but motor power should still be on before boot for the cleanest demo.
+
+## Hardware Safety Checks
+
+Before applying power, verify every socketed module and breakout board is seated in the correct header, correct orientation, and correct pin alignment. The current board uses female headers for several modules, which makes it possible to insert a module into the wrong header position or offset it by one pin without noticing.
+
+A one-pin offset can connect supply voltage to the wrong module pin and permanently damage hardware. For the TMC2209 specifically, check VIN, GND, VM, EN, STEP, DIR, and UART pin alignment against the board silkscreen before powering the stage.
 
 ## Clean Boot
 
@@ -201,6 +208,7 @@ Stop the demo and debug before continuing if any of these occur:
 - Calibration does not complete.
 - `motor.status` does not report `limits_valid:true` after calibration.
 - Multiple I2C sensors disappear at the same time.
+- Any socketed module appears misaligned, loose, hot, damaged, offset on its headers, or seated in the wrong header position.
 - The stage moves opposite the expected direction.
 - The stage skips, binds, stalls, or repeatedly gets stuck at the same physical spot.
 - The OpenCV mask locks onto reflections instead of the flame.

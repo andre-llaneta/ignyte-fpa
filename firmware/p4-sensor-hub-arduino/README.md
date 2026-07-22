@@ -1,5 +1,6 @@
 <!--
 Primary author: Will Andre Pasimio Llaneta (wpl5304)
+GitHub: https://github.com/andre-llaneta
 Project: IgNYte-FPA
 Context: NYU Tandon IgNYte Lab fire propagation apparatus internship work.
 -->
@@ -17,6 +18,26 @@ The firmware is responsible for:
 - publishing timestamped newline-delimited JSON telemetry/status lines
 
 The production IgNYte web app owns the operator UI, camera workflows, recording/export behavior, and Web Serial connection. The firmware owns hardware state, calibrated motor limits, driver configuration, and sensor/flow polling.
+
+## Prerequisites
+
+- PlatformIO, either through the VS Code PlatformIO extension or the
+  command-line tool.
+- Python 3 if installing PlatformIO from the command line:
+
+```powershell
+python -m pip install platformio
+```
+
+- USB connection to the ESP32-P4 board.
+- Motor-driver/motor power connected before firmware boot when validating
+  motor configuration or motion.
+- Optional: Chrome or Edge for testing the flashed board through the IgNYte web
+  app or browser Web Serial tools.
+
+PlatformIO downloads the ESP32-P4 platform and Arduino libraries listed in
+`platformio.ini` during the first build. No manual Arduino library downloads
+are required.
 
 ## Build And Test
 
@@ -39,6 +60,33 @@ pio run -d firmware/p4-sensor-hub-arduino -e esp32-p4-motor-debug
 ```
 
 The motor-only debug build defines `IGNYTE_MOTOR_ONLY_DEBUG=1`. It keeps the command, telemetry, and motor tasks active while skipping sensor and flow-controller initialization/tasks.
+
+Upload the default firmware:
+
+```powershell
+pio run -d firmware/p4-sensor-hub-arduino -t upload
+```
+
+If PlatformIO cannot find the board automatically, list serial devices:
+
+```powershell
+pio device list
+```
+
+Then pass the upload port explicitly:
+
+```powershell
+pio run -d firmware/p4-sensor-hub-arduino -t upload --upload-port COMx
+```
+
+Open the serial monitor:
+
+```powershell
+pio device monitor -d firmware/p4-sensor-hub-arduino -b 115200
+```
+
+Native tests may require a working desktop compiler toolchain if PlatformIO
+does not find one automatically.
 
 ## Main Modules
 
